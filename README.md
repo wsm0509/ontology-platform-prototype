@@ -8,6 +8,20 @@
 
 详细操作及模拟范围见 [使用与调整说明](使用与调整说明.md)，界面截图位于 `预览图/`。
 
+## GitHub Pages
+
+本项目为纯静态页面，可通过 GitHub Pages 在线访问，无需构建或后端服务。
+
+在仓库的 **Settings → Pages** 中选择 **Deploy from a branch**，使用 `main` 分支和 `/(root)` 目录。首次部署完成后，访问：
+
+```text
+https://<GitHub 用户名>.github.io/<仓库名称>/
+```
+
+后续推送到 GitHub 的 `main` 分支会自动更新站点。根目录的 `.nojekyll` 用于跳过 Jekyll 处理，页面资源均使用相对路径，兼容项目子路径部署。
+
+注意：Pages 网站公开可访问；页面仅演示内置模拟数据，不应录入真实业务数据、账号密码或密钥。
+
 ## 验证
 
 安装 Node.js 后运行：

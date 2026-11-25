@@ -16,12 +16,13 @@ const rulePropertyDependencies = [
 ];
 
 function sceneTemplateErrors(s) {
+  if(s.workflow?.type==='qa'&&s.workflow.application?.qaScope==='platform')return [];
   const errors = [];
   if (!obj(s.root)) errors.push(`主对象 ${s.root}`);
-  for (const id of sceneAbilities(s)) if (!ability(id)) errors.push(`数据查询 ${id}`);
+  for (const id of sceneAbilities(s)) if (!ability(id)) errors.push(`取数能力 ${id}`);
   for (const b of Object.values(s.bindings).flat()) {
     const [oid,pid] = b.ontology.split('.');
-    if (!obj(oid)?.props.some(p => p.id === pid)) errors.push(`业务属性 ${b.ontology}`);
+    if (!obj(oid)?.props.some(p => p.id === pid)) errors.push(`本体对象属性 ${b.ontology}`);
   }
   return [...new Set(errors)];
 }
@@ -31,7 +32,7 @@ function propertyDeleteReferences(o, p) {
   if (p.key) refs.push('这是对象的记录的唯一编号，请先在“编辑定义”中将其他属性设为记录的唯一编号。');
   if (p.display) refs.push('这是列表显示名称，请先将其他属性设为列表显示名称。');
   for (const c of capabilities) {
-    if (c.maps.some(m => m.target === path)) refs.push(`数据查询“${c.name}”对应关系到 ${path}，请先调整或移除该对应关系。`);
+    if (c.maps.some(m => m.target === path)) refs.push(`取数能力“${c.name}”对应关系到 ${path}，请先调整或移除该对应关系。`);
   }
   for (const s of Object.values(appScenes)) {
     for (const [block, bs] of Object.entries(s.bindings)) {
@@ -39,7 +40,7 @@ function propertyDeleteReferences(o, p) {
     }
   }
   for (const r of relations) {
-    if ((r.from === o.id && r.left === p.id) || (r.to === o.id && r.right === p.id)) refs.push(`对象关系“${r.name}”使用此属性，请先调整或删除该关系。`);
+    if (relationUsesAttribute(r,o.id,p.id)) refs.push(`对象关系“${r.name}”使用此属性，请先调整或删除该关系。`);
   }
   for (const [dependency, rule] of rulePropertyDependencies) {
     if (dependency === path) refs.push(`内置规则“${rule}”读取此属性，当前原型固定模板暂不支持解除该依赖。`);
@@ -56,12 +57,21 @@ function deletionPlan(kind, target, owner = {}) {
     label = `属性“${target.name}”`;
     detail = `${owner.object}.${target.id}；仅删除属性定义，不删除源系统字段。`;
     if (exists) refs.push(...propertyDeleteReferences(o, target));
+  } else if (kind === 'knowledgeLink') {
+    exists = knowledgeLinks.includes(target);
+    label = `知识关联“${target.title}”`;
+    detail = `关联对象：${target.objects.map(name).join('、')}。只移除此关联，保留文档和本体对象。`;
+  } else if (kind === 'manualRecord') {
+    exists = !!manualInstances[owner.object]?.includes(target);
+    label = `手工记录“${target.identity}”`;
+    detail = '仅删除当前会话中的这条手工记录，保留本体对象、属性定义及其他记录。';
   } else if (kind === 'object') {
     exists = objects.includes(target);
-    label = `业务对象“${target.name}”`;
+    label = `本体对象“${target.name}”`;
     detail = `${target.id}；同时移除本对象的 ${target.props.length} 个属性定义，不删除源系统数据。`;
-    if (objects.length === 1) refs.push('工作区至少需要保留一个业务对象。');
-    for (const c of capabilities.filter(c => c.object === target.id || c.maps.some(m => m.target.startsWith(target.id + '.')))) refs.push(`数据查询“${c.name}”输出到此对象，请先调整或删除查询。`);
+    if (objects.length === 1) refs.push('工作区至少需要保留一个本体对象。');
+    for (const k of knowledgeLinks.filter(k => k.objects.includes(target.id))) refs.push(`知识“${k.title}”关联了此对象，请先删除知识关联。`);
+    for (const c of capabilities.filter(c => c.object === target.id || c.maps.some(m => m.target.startsWith(target.id + '.')))) refs.push(`取数能力“${c.name}”输出到此对象，请先调整或删除查询。`);
     for (const r of relations.filter(r => r.from === target.id || r.to === target.id)) refs.push(`对象关系“${r.name}”关联此对象，请先调整或删除关系。`);
     for (const o of objects.filter(o => o !== target)) {
       for (const p of o.props.filter(p => p.ref === target.id)) refs.push(`“${o.name}.${p.name}”的引用类型指向此对象，请先调整该属性。`);
@@ -83,21 +93,21 @@ function deletionPlan(kind, target, owner = {}) {
     detail = `${s?.name || owner.scene} / ${s?.names[owner.block] || owner.block}：${target.ontology} → ${target.target}；仅影响该场景。`;
   } else if (kind === 'capability') {
     exists = capabilities.includes(target);
-    label = `数据查询“${target.name}”`;
-    detail = `${target.id}；同时移除参数和来源字段对应，保留系统连接、业务对象定义及源系统数据。`;
+    label = `取数能力“${target.name}”`;
+    detail = `${target.id}；同时移除参数和来源字段对应，保留系统连接、本体对象定义及源系统数据。`;
     for (const s of usedScenes(target.id)) refs.push(`场景“${s.name}”使用此查询，请先调整数据更新方式或删除场景。${[s.bom && 'plm.queryBom',s.cert && 'cert.queryApplicable',sceneKind(s) === 'release' && 'software.getPackage'].includes(target.id) ? '该查询由此场景的内置规则模板固定引用。' : ''}`);
   } else if (kind === 'connector') {
     exists = systemConnectors.includes(target);
     label = `系统连接“${target.name}”`;
     detail = `${target.id}；仅移除连接配置，不删除外部系统或源数据。`;
-    for (const c of capabilities.filter(c => c.connector === target.id)) refs.push(`数据查询“${c.name}”使用此系统连接，请先调整或删除查询。`);
+    for (const c of capabilities.filter(c => c.connector === target.id)) refs.push(`取数能力“${c.name}”使用此系统连接，请先调整或删除查询。`);
   } else if (kind === 'scene') {
     exists = appScenes[target.id] === target;
     label = `应用场景“${target.name}”`;
-    detail = `同时删除此场景的 ${Object.values(target.bindings).flat().length} 项字段绑定、数据更新方式、上下文与规则配置；保留业务对象管理、系统连接和查询。`;
+    detail = `同时删除此场景的 ${Object.values(target.bindings).flat().length} 项字段绑定、数据更新方式、上下文与规则配置；保留本体对象管理、系统连接和查询。`;
     if (target.id === 'release') refs.push('“产品发布”是智能提单与完整发布校验的内置演示场景，当前原型需保留。自行创建的场景可删除，包括基于产品发布模板创建的场景。');
   }
-  if (!exists) refs.unshift('此配置已不存在，请关闭面板后刷新列表。');
+  if (!exists) refs.unshift(kind === 'manualRecord' ? '此手工记录已不存在，请关闭面板后刷新列表。' : '此配置已不存在，请关闭面板后刷新列表。');
   return {exists, label, detail, refs: [...new Set(refs)]};
 }
 
@@ -107,8 +117,8 @@ function requestDeletion(kind, target, owner = {}) {
 }
 
 function deletionDrawer() {
-  const d = state.drawer, plan = deletionPlan(d.deleteKind, d.target, d.owner);
-  return frame(plan.refs.length ? '暂不能删除' : '确认删除配置', '删除仅影响当前会话；刷新页面可恢复初始示例。',
+  const d = state.drawer, plan = deletionPlan(d.deleteKind, d.target, d.owner), manual = d.deleteKind === 'manualRecord', knowledge = d.deleteKind === 'knowledgeLink';
+  return frame(plan.refs.length ? '暂不能删除' : manual ? '确认删除手工记录' : knowledge ? '确认删除关联' : '确认删除配置', manual ? '确认后从当前会话移除此记录。' : '删除仅影响当前会话；刷新页面可恢复初始示例。',
     `<h3 class="deletion-summary">${esc(plan.label)}</h3><p class="tiny muted section-gap deletion-summary">${esc(plan.detail)}</p><div class="section-gap">${plan.refs.length ? inf('请先处理以下依赖，再重新尝试删除。','amber') + `<ul class="deletion-list">${plan.refs.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : inf('确认后立即从当前工作区移除；相关测试结果及提交校验会失效。','amber')}</div>`,
     plan.refs.length ? '' : btn('确认删除','confirm-delete-config','danger'));
 }
@@ -127,6 +137,10 @@ function confirmDeletion() {
     remove(objects);
     if (state.object === target.id) { state.object = objects[0].id; state.tab = 'props'; state.domain = 'ALL'; state.query = ''; }
     if (studio.capObject === target.id) studio.capObject = 'ALL';
+  } else if (kind === 'knowledgeLink') remove(knowledgeLinks);
+  else if (kind === 'manualRecord') {
+    remove(manualInstances[owner.object]);
+    for (const s of Object.values(appScenes)) if (s.workflow?.instanceSource === 'manual') s.revision++;
   } else if (kind === 'relation') remove(relations);
   else if (kind === 'binding') {
     const s = appScenes[owner.scene]; remove(s.bindings[owner.block]); s.revision++; s.lastResult = null;
@@ -140,11 +154,12 @@ function confirmDeletion() {
   }
   changed();
   if (!['binding','scene'].includes(kind)) Object.values(appScenes).forEach(s => { s.lastResult = null; });
-  log('配置删除',plan.label,'成功',plan.detail);
+  log(kind === 'manualRecord' ? '记录删除' : '配置删除',plan.label,'成功',plan.detail);
   closeOverlay(true); render(); toast(`${plan.label}已删除`);
 }
 
 Object.assign(actionsMap, {
+  'delete-knowledge-link': el => requestDeletion('knowledgeLink',knowledgeLinks[Number(el.dataset.index)]),
   'delete-prop': el => requestDeletion('prop',obj().props[Number(el.dataset.index)],{object:obj().id}),
   'delete-object': el => requestDeletion('object',obj(el.dataset.id)),
   'delete-relation': el => requestDeletion('relation',relations[Number(el.dataset.index)]),
@@ -159,7 +174,7 @@ Object.assign(actionsMap, {
 const connectorsPageBeforeDeletion = connectorsPage;
 connectorsPage = function() {
   if (!connector()) studio.connector = systemConnectors[0]?.id || '';
-  if (!systemConnectors.length) return header('系统连接','统一管理系统访问方式及可复用的数据查询。',btn('新增系统连接','add-connector','primary','plus'),'SYSTEM INTEGRATION') + '<section class="panel"><div class="empty">尚无系统连接，请点击“新增系统连接”建立连接。</div></section>';
+  if (!systemConnectors.length) return header('系统连接','统一管理系统访问方式及可复用的取数能力。',btn('新增系统连接','add-connector','primary','plus'),'数据接入') + '<section class="panel"><div class="empty">尚无系统连接，请点击“新增系统连接”建立连接。</div></section>';
   return connectorsPageBeforeDeletion();
 };
 
@@ -167,14 +182,15 @@ const configErrorsBeforeDeletion = configErrors;
 configErrors = function() {
   const errors = configErrorsBeforeDeletion();
   for (const r of relations) {
-    if (!obj(r.from)?.props.some(p => p.id === r.left) || !obj(r.to)?.props.some(p => p.id === r.right)) errors.push(`对象关系“${r.name}”引用的对象或属性不存在`);
+    const issue = relationAttributeIssue(r);
+    if (issue) errors.push(`关系“${r.name}”：${issue}`);
   }
   for (const o of objects) for (const p of o.props) {
     if (p.ref && !obj(p.ref)) errors.push(`${o.name}.${p.name} 引用的对象不存在`);
   }
   for (const s of Object.values(appScenes)) {
-    if (!obj(s.root)) errors.push(`${s.name} 的主对象不存在`);
-    for (const id of sceneAbilities(s)) if (!ability(id)) errors.push(`${s.name} 引用的数据查询不存在：${id}`);
+    if (!(s.workflow?.type==='qa'&&s.workflow.application?.qaScope==='platform')&&!obj(s.root)) errors.push(`${s.name} 的主对象不存在`);
+    for (const id of sceneAbilities(s)) if (!ability(id)) errors.push(`${s.name} 引用的取数能力不存在：${id}`);
   }
   return [...new Set(errors)];
 };

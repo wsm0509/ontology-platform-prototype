@@ -40,12 +40,72 @@ test('全屏保留缩放和对象，切换节点及退出后状态正确',run=>r
 test('缩放生成真实滚动范围，以可见中心为锚点并能重置居中',run=>run(`
   const viewport=document.getElementById('graph-viewport'),content=document.getElementById('graph-zoom-content'),space=document.getElementById('graph-zoom-space');Object.assign(viewport,{clientWidth:600,clientHeight:420,scrollLeft:0,scrollTop:0});content.querySelector=()=>({dataset:{graphHeight:'390'}});setGraphZoom(200);assert.equal(content.style.transform,'scale(2)');assert.equal(space.style.width,'1200px');assert.equal(space.style.height,'780px');assert.equal(viewport.scrollLeft,300);assert.equal(viewport.scrollTop,180);setGraphZoom(50);assert.equal(space.style.width,'300px');assert.equal(space.style.height,'195px');assert.equal(viewport.scrollLeft,0);assert.equal(viewport.scrollTop,0);actionsMap['graph-zoom-reset']();assert.equal(content.style.transform,'scale(1)');assert.equal(space.style.width,'600px');assert.equal(viewport.scrollLeft,0);
 `));
-test('本体对象统一入口、关系范围和旧链接兼容',run=>run(`
-  const entries=nav.flatMap(n=>n[1]);assert(entries.some(n=>n[0]==='objects'));assert(!entries.some(n=>['graph','relations'].includes(n[0])));
-  for(const tab of ['props','relations','graph']){state.tab=tab;const html=objectsPage();assert(html.includes('data-tab="relations"'));assert(html.includes('data-tab="graph"'));assert.equal((html.match(/id="object-search"/g)||[]).length,1);assert(!html.includes('graph-object-picker'));}
-  navigate('relations');assert.equal(state.route,'objects');assert.equal(state.tab,'relations');assert(objectsPage().includes('与 整机物料 直接关联的关系 · 5 条'));
-  actionsMap['relation-scope']({dataset:{scope:'all'}});assert(objectsPage().includes('当前业务域内全部关系 · '+relations.length+' 条'));
-  navigate('graph');assert.equal(state.route,'objects');assert.equal(state.tab,'graph');actionsMap['to-relations']();assert.equal(state.relationScope,'current');assert.equal(state.tab,'relations');
-  actionsMap['graph-add-relation']();assert.equal(state.drawer.draft.from,state.object);
+test('对象关系拥有独立列表入口，局部关系仍留在对象详情',run=>run(`
+  const entries=nav.flatMap(n=>n[1]);assert(entries.some(n=>n[0]==='relations'));assert(!entries.some(n=>n[0]==='graph'));
+  state.domain='ALL';state.relationQuery='';state.relationView='list';navigate('relations');
+  assert.equal(state.route,'relations');assert(globalRelationsPage().includes('对象关系总览'));
+  assert(globalRelationsPage().includes('关系列表'));assert(globalRelationsPage().includes('全量图谱'));
+  assert.equal((globalRelationsPage().match(/data-action="edit-relation"/g)||[]).length,relations.length);
+  state.route='objects';state.tab='relations';assert(objectsPage().includes('与 整机物料 直接关联的关系'));
+  actionsMap['to-relations']();assert.equal(state.route,'relations');
+`));
+test('全量图谱展示全部对象和真实关系，独立对象不遗漏',run=>run(`
+  state.domain='ALL';state.relationView='graph';const model=globalGraphModel(),html=globalRelationsPage();
+  assert.equal(model.nodes.length,objects.length);assert.equal(model.edges.length,relations.length);
+  assert.equal((html.match(/class="object-graph-node global-graph-node/g)||[]).length,objects.length);
+  assert.equal((html.match(/class="global-graph-edge"/g)||[]).length,relations.length);
+  assert(html.includes('data-id="Project"')===objects.some(o=>o.id==='Project'));
+  assert(!html.includes('认证上下文为派生路径'));
+  assert(!html.includes('NaN'));assert(!html.includes('undefined'));
+`));
+test('全量图谱连线走对象间通道，关系名称不压住对象或彼此',run=>run(`
+  state.domain='ALL';const model=globalGraphModel(),routes=globalGraphRoutes(model);
+  const rects=model.nodes.map(o=>{const p=model.positions.get(o.id);return {left:p.x-94,right:p.x+94,top:p.y-50,bottom:p.y+50}});
+  const labels=routes.map(r=>{const half=Math.min(78,Math.max(33,[...r.relation.name].length*6+12));return {left:r.labelX-half-5,right:r.labelX+half+5,top:r.labelY-18,bottom:r.labelY+18}});
+  const overlap=(a,b)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;
+  for(let i=0;i<labels.length;i++){
+    assert(!rects.some(rect=>overlap(labels[i],rect)),routes[i].relation.name+' 遮挡对象');
+    assert(!labels.slice(0,i).some(rect=>overlap(labels[i],rect)),routes[i].relation.name+' 遮挡关系名称');
+  }
+  for(const route of routes){
+    if(route.relation.from===route.relation.to)continue;
+    assert.match(route.path,/^M[0-9.-]+ [0-9.-]+ H[0-9.-]+ V[0-9.-]+ H[0-9.-]+$/);
+    const a=model.positions.get(route.relation.from),b=model.positions.get(route.relation.to);
+    const lane=Number(route.path.match(/ H([0-9.-]+) V/)[1]);
+    if(a.x!==b.x)assert(Math.abs(lane-a.x)>94&&Math.abs(lane-b.x)>94);
+  }
+`));
+test('列表搜索与业务域过滤同步作用于图谱',run=>run(`
+  state.domain='COMMON';state.relationView='list';state.relationQuery='认证';
+  const scope=globalRelationScope(),html=globalRelationsPage();
+  assert(scope.nodes.every(o=>visible(o)));
+  assert(scope.edges.every(r=>visible(obj(r.from))&&visible(obj(r.to))));
+  assert(html.includes('匹配 1 条'));assert(html.includes('适用认证'));
+  assert.equal(globalGraphModel().edges.length,scope.edges.length);
+`));
+test('全量图谱使用独立的默认缩放，局部图谱比例不受影响',run=>run(`
+  state.route='relations';state.relationView='graph';assert.equal(graphZoomPercent(),75);
+  actionsMap['graph-zoom-in']();assert.equal(graphZoomPercent(),100);
+  state.route='objects';state.tab='graph';assert.equal(graphZoomPercent(),100);
+  state.route='relations';assert.equal(graphZoomPercent(),100);
+`));
+test('进入全量图谱时从起点展示，并可保留滚动缩放',run=>run(`
+  state.route='relations';state.relationView='graph';
+  const viewport=document.getElementById('graph-viewport'),content=document.getElementById('graph-zoom-content'),space=document.getElementById('graph-zoom-space');
+  Object.assign(viewport,{clientWidth:900,clientHeight:640,scrollLeft:200,scrollTop:0});
+  content.querySelector=()=>({dataset:{graphWidth:'1800',graphHeight:'1100'}});
+  syncGraphViewport(true);assert.equal(viewport.scrollLeft,0);assert.equal(space.style.width,'1350px');
+  viewport.scrollLeft=180;setGraphZoom(100);assert(viewport.scrollLeft>180);
+`));
+test('新增、删除与多条同端点关系即时更新全量视图',run=>run(`
+  state.domain='ALL';state.relationView='graph';
+  const before=globalGraphModel().edges.length;
+  relations.push({name:'全局新增测试',from:'Material',to:'ReleaseOrder',card:'多对一（N:1）',method:'字段关联'},
+    {name:'全局第二条',from:'Material',to:'ReleaseOrder',card:'多对一（N:1）',method:'字段关联'});
+  let html=globalRelationsPage();assert.equal(globalGraphModel().edges.length,before+2);
+  assert(html.includes('全局新增测试'));assert(html.includes('全局第二条'));
+  const first=relations[relations.length-2];requestDeletion('relation',first);confirmDeletion();
+  html=globalRelationsPage();assert.equal(globalGraphModel().edges.length,before+1);
+  assert(!html.includes('全局新增测试'));assert(html.includes('全局第二条'));
 `));
 console.log('共 '+passed+' 组图谱回归验证通过');
