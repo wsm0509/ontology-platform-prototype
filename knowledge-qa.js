@@ -77,7 +77,7 @@ function knowledgeQAEntry(s,runMode){
   if(runMode!=='draft')return m?.snapshot?.knowledgeQAEntry||null;
   const w=workflowScene(s),ref=w.knowledgeQAEntry;
   const objectIds=[...new Set([s.root,...Object.values(w.blocks).map(b=>b.object),
-    ...Object.values(s.bindings).flat().map(b=>b.ontology.split('.')[0])])];
+    ...Object.values(s.bindings).flat().map(b=>b.ontology.split('.')[0])].filter(Boolean))];
   return ref?{...ref,objectIds,sources:knowledgeQASources([],s.id)}:null;
 }
 function knowledgeQACombined(profile,entry){

@@ -22,6 +22,9 @@ function systemConnectionCommonError(d){
   if(!d.isNew&&(!connector(d.originalId)||v.id!==d.originalId))return '系统连接已不存在或英文代号已改变，请保留原代号。';
   if(!Number.isInteger(Number(v.timeout))||Number(v.timeout)<1||!Number.isInteger(Number(v.retry))||Number(v.retry)<0||Number(v.retry)>5)return '超时应为正整数，重试次数应为 0 至 5。';
   for(const ability of [...capabilities,...[...sceneReleaseStore.values()].filter(m=>!m.deleted&&m.published).flatMap(m=>(m.snapshot?.queries||m.dependencies?.queries||[]).flatMap(q=>q.value?[q.value]:[]))].filter(a=>a.connector===(d.originalId||v.id))){const type=ability.connectionType||(ability.method==='数据库查询'?'database':['GET','POST 查询'].includes(ability.method)?'api':ability.method==='MCP'?'mcp':'');if(type&&!v.types.includes(type))return `取数能力“${ability.name}”仍使用${systemConnectionTypes.find(t=>t[0]===type)?.[1]||type}，请先调整该能力。`;}
+  const tableUses=Object.values(appScenes).flatMap(s=>Object.values(s.workflow?.blocks||{}).filter(b=>b.database===(d.originalId||v.id)));
+  if(typeof sceneReleaseStore!=='undefined')for(const m of sceneReleaseStore.values())if(!m.deleted&&m.published)tableUses.push(...Object.values(m.snapshot?.scene?.workflow?.blocks||{}).filter(b=>b.database===(d.originalId||v.id)));
+  if(tableUses.length&&!v.types.includes('database'))return '业务单据结构仍使用此数据库连接，请先调整场景数据表。';
   return '';
 }
 function systemConnectionTypeError(v,type){
@@ -35,6 +38,9 @@ function systemConnectionTypeError(v,type){
     const names=c.tables.map(t=>t.name.trim().toLowerCase());
     if(c.tables.some(t=>!/^[A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?$/.test(t.name.trim())))return '请填写有效表名，例如 MATERIAL 或 PUBLIC.MATERIAL。';
     if(new Set(names).size!==names.length)return '存在重复的数据库表，请保留一条。';
+    const sceneTables=Object.values(appScenes).flatMap(s=>Object.values(s.workflow?.blocks||{}).filter(b=>b.database===v.id));
+    if(typeof sceneReleaseStore!=='undefined')for(const m of sceneReleaseStore.values())if(!m.deleted&&m.published)sceneTables.push(...Object.values(m.snapshot?.scene?.workflow?.blocks||{}).filter(b=>b.database===v.id));
+    if(sceneTables.some(b=>!names.includes(b.table.trim().toLowerCase())))return '数据表仍被业务单据结构或已发布场景引用，请先调整场景配置。';
     const existing=[...capabilities,...[...sceneReleaseStore.values()].filter(m=>!m.deleted&&m.published).flatMap(m=>(m.snapshot?.queries||m.dependencies?.queries||[]).flatMap(q=>q.value?[q.value]:[]))].filter(a=>a.connector===v.id&&a.method==='数据库查询');
     for(const ability of existing)for(const table of Array.isArray(ability.tables)?ability.tables:[ability.resource.replace(/[（(].*$/,'').trim()]){if(!names.includes(table.toLowerCase()))return `表“${table}”仍被取数能力“${ability.name}”使用，请保留该表或先调整能力。`;}
   }else{

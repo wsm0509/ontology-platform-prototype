@@ -14,7 +14,7 @@ function fullWorkspace() {
 test('智能提单仅有三类配置和一个版本记录页签', () => fullWorkspace()(`
   for (const s of Object.values(appScenes).filter(s=>workflowScene(s).type==='draft')) {
     assert.deepEqual(JSON.parse(JSON.stringify(workflowTabs(s))), [
-      ['strategy','对象与表单映射'],['rules','校验规则'],['actions','场景流'],['versions','版本记录']
+      ['strategy','对象与表单映射'],['rules','规则配置'],['actions','场景流'],['versions','版本记录']
     ]);
   }
 `));

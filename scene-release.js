@@ -23,7 +23,7 @@ function sceneReleaseDependencies(s){
     return {objects:compiled.objectIds.map(id=>({id,value:structuredClone(obj(id)||null)})),queries:[],connectors:[],relations:compiled.relations,knowledge:compiled.sources};
   }
   if(['draft','validation'].includes(type)){
-    for(const b of Object.values(w.blocks))objectsUsed.add(b.object);
+    for(const b of Object.values(w.blocks))if(b.object)objectsUsed.add(b.object);
     for(const b of Object.values(s.bindings).flat()){objectsUsed.add(b.ontology.split('.')[0]);workflowBindingSourceIds(s,b).forEach(id=>queries.add(id));}
     if(w.instanceSource==='system'){queries.add(s.candidate);queries.add(s.master);}
     if(s.bom)queries.add('plm.queryBom');if(s.cert)queries.add('cert.queryApplicable');
@@ -37,7 +37,7 @@ function sceneReleaseDependencies(s){
   const queryList=[...queries].filter(Boolean).map(id=>({id,value:structuredClone(ability(id)||null)}));
   queryList.forEach(({value})=>{if(value&&value.object!=='Context')objectsUsed.add(value.object)});
   const links=relations.filter(r=>objectsUsed.has(r.from)&&objectsUsed.has(r.to));
-  return {objects:[...objectsUsed].sort().map(id=>({id,value:structuredClone(obj(id)||null)})),queries:queryList,connectors:[...new Set(queryList.map(c=>c.value?.connector).filter(Boolean))].sort().map(id=>({id,value:structuredClone(connector(id)||null)})),relations:structuredClone(links),knowledge:contextKnowledgeLinks('scene',s.id).map(k=>({id:k.documentId,title:k.title,document:structuredClone(contextKnowledgeDocument(k)||null)}))};
+  return {objects:[...objectsUsed].sort().map(id=>({id,value:structuredClone(obj(id)||null)})),queries:queryList,connectors:[...new Set([...queryList.map(c=>c.value?.connector),...(['draft','validation'].includes(type)?Object.values(w.blocks).map(b=>b.database):[])].filter(Boolean))].sort().map(id=>({id,value:structuredClone(connector(id)||null)})),relations:structuredClone(links),knowledge:contextKnowledgeLinks('scene',s.id).map(k=>({id:k.documentId,title:k.title,document:structuredClone(contextKnowledgeDocument(k)||null)}))};
 }
 function sceneReleaseFingerprint(s){return JSON.stringify({configuration:sceneReleaseConfiguration(s),dependencies:sceneReleaseDependencies(s)});}
 function sceneReleaseCheckCurrent(s){const m=sceneReleaseEnsure(s);return !!m.check&&m.check.fingerprint===sceneReleaseFingerprint(s);}
@@ -59,15 +59,18 @@ function sceneReleaseCheck(s){
   if(['draft','validation'].includes(w.type)){
     const issues=[],blocks=Object.values(w.blocks);if(!blocks.length||blocks.filter(b=>!b.parent).length!==1)issues.push('表单应有且仅有一个主单区块');
     if(new Set(blocks.map(b=>b.path)).size!==blocks.length)issues.push('表单区块的字段组名称重复');
-    for(const b of blocks){if(!obj(b.object))issues.push(`${b.label} 对应的本体对象不存在`);if(!b.fields.some(f=>f.key===b.keyField))issues.push(`${b.label} 未设置记录的唯一编号字段`);if(new Set(b.fields.map(f=>f.key)).size!==b.fields.length)issues.push(`${b.label} 的字段名称重复`);if(b.parent&&!w.blocks[b.parent])issues.push(`${b.label} 的所属区块不存在`);let parent=b.parent,seen=new Set([b.id]);while(parent&&w.blocks[parent]){if(seen.has(parent)){issues.push(`${b.label} 的所属区块形成循环`);break;}seen.add(parent);parent=w.blocks[parent].parent;}
-      const bindings=s.bindings[b.id]||[];if(new Set(bindings.map(m=>m.target)).size!==bindings.length)issues.push(`${b.label} 有重复的表单字段对应`);for(const m of bindings){const sourceError=workflowBindingSourcesError(s,m);if(sourceError)issues.push(`${b.label} / ${m.label}：${sourceError}`);const [oid,pid]=m.ontology.split('.');if(!obj(oid)?.props.some(p=>p.id===pid))issues.push(`${b.label} / ${m.label} 的本体对象属性不存在`);if(!b.fields.some(f=>scenePrefix(s,b.id)+f.key===m.target))issues.push(`${b.label} / ${m.label} 的表单字段未登记`);if(w.type==='draft'&&(!m.sinkTable?.trim()||!m.sinkColumn?.trim()))issues.push(`${b.label} / ${m.label} 未填写业务系统保存位置`);if(m.instanceMode==='manual'&&!(manualInstances[oid]||[]).some(row=>row.identity===m.instanceIdentity))issues.push(`${b.label} / ${m.label} 的手工记录不存在`);}}
+    for(const b of blocks){if((b.object||b.structureSource!=='table')&&!obj(b.object))issues.push(`${b.label} 对应的本体对象不存在`);if(!b.fields.some(f=>f.key===b.keyField))issues.push(`${b.label} 未设置记录的唯一编号字段`);if(new Set(b.fields.map(f=>f.key)).size!==b.fields.length)issues.push(`${b.label} 的字段名称重复`);if(b.parent&&!w.blocks[b.parent])issues.push(`${b.label} 的所属区块不存在`);let parent=b.parent,seen=new Set([b.id]);while(parent&&w.blocks[parent]){if(seen.has(parent)){issues.push(`${b.label} 的所属区块形成循环`);break;}seen.add(parent);parent=w.blocks[parent].parent;}
+      const bindings=s.bindings[b.id]||[];if(new Set(bindings.map(m=>m.target)).size!==bindings.length)issues.push(`${b.label} 有重复的表单字段对应`);for(const m of bindings){const sourceError=workflowBindingSourcesError(s,m);if(sourceError)issues.push(`${b.label} / ${m.label}：${sourceError}`);const [oid,pid]=m.ontology.split('.');if(!obj(oid)?.props.some(p=>p.id===pid))issues.push(`${b.label} / ${m.label} 的本体对象属性不存在`);if(!b.fields.some(f=>scenePrefix(s,b.id)+f.key===m.target))issues.push(`${b.label} / ${m.label} 的表单字段未登记`);if(w.type==='draft'&&(!m.sinkTable?.trim()||!m.sinkColumn?.trim()))issues.push(`${b.label} / ${m.label} 未填写业务系统保存位置`);if(typeof sceneMappingBindingIssue==='function'){const mappingIssue=sceneMappingBindingIssue(s,b,m,bindings.indexOf(m));if(mappingIssue)issues.push(`${b.label} / ${m.label}：${mappingIssue}`);}if(m.instanceMode==='manual'&&!(manualInstances[oid]||[]).some(row=>row.identity===m.instanceIdentity))issues.push(`${b.label} / ${m.label} 的手工记录不存在`);}}
     for(const id of Object.keys(s.bindings))if(!w.blocks[id])issues.push(`字段对应的区块 ${id} 不存在`);
+    if(typeof sceneTableConfigIssues==='function')issues.push(...sceneTableConfigIssues(s));
+    if(w.type==='draft')for(const b of blocks.filter(b=>!b.database))for(const f of b.fields)if(f.mappingMode==='mapping'&&!(s.bindings[b.id]||[]).some(m=>m.target===scenePrefix(s,b.id)+f.key))issues.push(`${b.label} / ${f.label} 已选择参与映射，请完成对应关系或改为不参与。`);
     group('表单结构和字段对应',issues);
     group('已启用的校验规则',w.rules.filter(r=>r.enabled).map(r=>{try{const error=validateWorkflowRule(s,r);return error?`${r.name}：${error}`:'';}catch{return `${r.name} 的执行对象或字段不完整`;}}).filter(Boolean));
   }
   const newQA=w.type==='qa'&&typeof knowledgeQAConfigurationIssues==='function';
   const settings=newQA?'':applicationConfigError({...appConfig(s),sceneType:w.type},w.type);
   const settingsIssues=newQA?knowledgeQAConfigurationIssues(s,knowledgeQAProfile(s)):settings?[settings]:[];
+  if(w.type==='draft'&&typeof sceneFlowConfigError==='function'){const flowIssue=sceneFlowConfigError(sceneFlowConfig(s));if(flowIssue)settingsIssues.push(`场景流：${flowIssue}`);}
   if(w.type==='draft'&&w.knowledgeQAEntry&&typeof knowledgeQAPublished==='function'){
     const {id,version}=w.knowledgeQAEntry;
     if(!knowledgeQAPublished(id,version)?.objectIds.includes(s.root))settingsIssues.push('辅助问答引用不可用，或未覆盖当前场景主对象。');
@@ -114,7 +117,7 @@ Object.assign(actionsMap,{
   publish:()=>actionsMap['scene-release-prepare']({dataset:{id:scene().id}})
 });
 const sceneReleaseTabsBefore=workflowTabs;workflowTabs=function(s){return [...sceneReleaseTabsBefore(s),['versions','版本记录']];};
-const sceneReleaseMutations=new Set(['workflow-settings','workflow-save-settings','app-save-settings','edit-scene','save-scene','edit-scene-rules','save-scene-rules','workflow-add-block','workflow-edit-block','workflow-save-block','workflow-delete-block','workflow-confirm-delete-block','add-scene-binding','edit-scene-binding','save-scene-binding','delete-scene-binding','workflow-add-rule','workflow-edit-rule','workflow-save-rule','workflow-delete-rule','workflow-confirm-delete-rule','workflow-add-clause','workflow-remove-clause','delete-scene']);
+const sceneReleaseMutations=new Set(['workflow-rule-authoring','workflow-rule-generate','workflow-rule-confirm','scene-flow-settings','scene-flow-save-settings','workflow-ai-map','workflow-ai-regenerate','workflow-ai-apply','workflow-settings','workflow-save-settings','app-save-settings','edit-scene','save-scene','edit-scene-rules','save-scene-rules','workflow-add-block','workflow-edit-block','workflow-save-block','workflow-delete-block','workflow-confirm-delete-block','add-scene-binding','edit-scene-binding','save-scene-binding','delete-scene-binding','workflow-add-rule','workflow-edit-rule','workflow-save-rule','workflow-delete-rule','workflow-confirm-delete-rule','workflow-add-clause','workflow-remove-clause','delete-scene']);
 function sceneReleaseActionTargets(action,el){
   if(sceneReleaseMutations.has(action))return [action==='delete-scene'?el?.dataset.id:scene()?.id].filter(Boolean);
   if(['sync-edit-rule','sync-save-rule'].includes(action)){const rule=knowledgeSync.rules.find(r=>r.id===(el?.dataset.id||state.drawer?.draft?.id));const ids=[rule?.sceneId,action==='sync-save-rule'?state.drawer?.draft?.sceneId:''].filter(Boolean);return ids.length?[...new Set(ids)]:state.route==='scenes'?[scene()?.id]:[];}

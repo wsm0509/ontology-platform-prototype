@@ -101,6 +101,8 @@ function deletionPlan(kind, target, owner = {}) {
     label = `系统连接“${target.name}”`;
     detail = `${target.id}；仅移除连接配置，不删除外部系统或源数据。`;
     for (const c of capabilities.filter(c => c.connector === target.id)) refs.push(`取数能力“${c.name}”使用此系统连接，请先调整或删除查询。`);
+    for(const s of Object.values(appScenes))for(const b of Object.values(s.workflow?.blocks||{}))if(b.database===target.id)refs.push(`场景“${s.name}”的业务表“${b.table}”使用此数据库连接，请先调整或移除该表。`);
+    if(typeof sceneReleaseStore!=='undefined')for(const [id,m]of sceneReleaseStore)if(!m.deleted&&m.published&&Object.values(m.snapshot?.scene?.workflow?.blocks||{}).some(b=>b.database===target.id))refs.push(`已发布场景“${appScenes[id]?.name||id}”仍引用此业务表数据库连接，请先更新场景发布版本。`);
   } else if (kind === 'scene') {
     exists = appScenes[target.id] === target;
     label = `应用场景“${target.name}”`;
