@@ -42,10 +42,11 @@ test('旧结构与绑定入口归入映射页，区块和字段映射编辑锁�
 `));
 test('规则、场景流调试与版本快照入口均可达', () => fullWorkspace()(`
   selectScene('release','rules');
-  assert(pages.scenes().includes('data-action="workflow-add-rule"'));
+  assert(pages.scenes().includes('data-action="workflow-rule-authoring"'));
+  assert(!pages.scenes().includes('data-action="workflow-add-rule"'));
   studio.sceneTab='actions';
   const html=pages.scenes();
-  assert(html.includes('<h3>场景流</h3>'));
+  assert(html.includes('<h3>场景流 · 用户怎样完成一张流程单</h3>'));assert(html.includes('data-flow-operation-table'));assert(html.includes('data-flow-branches'));
   assert(html.includes('data-action="workflow-test"'));
   actionsMap['workflow-test']();
   assert.equal(state.drawer.type,'workflowTest');

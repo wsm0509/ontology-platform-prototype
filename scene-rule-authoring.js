@@ -1,216 +1,254 @@
-/* 自然语言规则配置：本地受控模板解析，不调用 AI，不执行规则，不自动保存或启用。 */
+/* 通用自然语言规则卡：本地解析模拟；生成、确认、保存与执行相互独立。 */
 'use strict';
-const workflowRuleAuthoringActions=['workflow-rule-authoring','workflow-rule-generate','workflow-rule-confirm'];
+const workflowRuleAuthoringExample='当申请人为后端业务部人员时，检查整机物料的最小系统是否发布，未发布拦截提交。';
 let workflowRuleAuthoringSequence=0;
+const workflowRuleCardOperators=[['eq','等于'],['neq','不等于'],['gt','大于'],['gte','大于等于'],['lt','小于'],['lte','小于等于'],['exists','不能为空'],['notExists','必须为空'],['in','属于集合'],['notIn','不属于集合'],['between','在范围内'],['contains','包含'],['notContains','不包含'],['startWith','以…开头'],['startsWith','以…开头'],['endWith','以…结尾'],['endsWith','以…结尾'],['matches','匹配正则'],['notMatches','不匹配正则']];
 function workflowRuleAuthoringContext(s,fn){return typeof objectReleaseWithScene==='function'?objectReleaseWithScene(s,fn):fn();}
-function workflowRuleAuthoringObjects(s){
-  const ids=new Set(Object.values(workflowScene(s).blocks).map(b=>b.object).filter(Boolean));
-  for(const binding of Object.values(s.bindings).flat())ids.add(binding.ontology.split('.')[0]);
-  return [...ids].map(id=>obj(id)).filter(o=>o?.props.length);
-}
-function workflowRuleAuthoringBlocks(s,id){
-  return Object.values(workflowScene(s).blocks).filter(b=>b.object===id||(s.bindings[b.id]||[]).some(m=>m.ontology.startsWith(id+'.')));
-}
-function workflowRuleAuthoringFingerprint(s,input){
-  return workflowRuleAuthoringContext(s,()=>JSON.stringify({
-    input:{originalText:input.originalText,objectId:input.objectId,scope:input.scope},
-    scene:typeof sceneReleaseFingerprint==='function'?sceneReleaseFingerprint(s):s,
-    objects:objects.map(o=>({id:o.id,version:s.ontologyVersions?.[o.id],props:o.props})),
-    queries:capabilities,connectors:systemConnectors
-  }));
-}
-function workflowRuleAuthoringStructure(r){
-  return JSON.stringify({scope:r.scope,trigger:r.trigger,conditions:r.conditions,assertions:r.assertions,params:r.params,level:r.level,message:r.message});
-}
+function workflowRuleAuthoringObjects(s){return typeof sceneMappingObjects==='function'?sceneMappingObjects(s):objects;}
+function workflowRuleAuthoringBlocks(s,id){return Object.values(workflowScene(s).blocks).filter(b=>b.object===id||(s.bindings[b.id]||[]).some(m=>m.ontology.startsWith(id+'.')));}
+function workflowRuleAuthoringFingerprint(s,input){return workflowRuleAuthoringContext(s,()=>JSON.stringify({input,scene:sceneReleaseFingerprint(s),objects:objects.map(o=>({id:o.id,props:o.props})),queries:capabilities,connectors:systemConnectors}));}
+function workflowRuleAuthoringStructure(r){return JSON.stringify({scope:r.scope,trigger:r.trigger,conditions:r.conditions,assertions:r.assertions,params:r.params,level:r.level,message:r.message,ontologyChain:r.ontologyChain,ruleCard:r.ruleCard});}
+// 原有明确语法作为可选解析插件，不再决定抽屉字段结构。
 function workflowRuleAuthoringParse(text){
-  const original=String(text||'').trim(),clarifications=[];
-  if(/资料完整/.test(original))clarifications.push('“资料完整”需要明确检查哪些资料，以及采用非空、数量还是发布状态标准。');
-  if(/正常/.test(original))clarifications.push('“正常”需要明确字段、运算和阈值或状态，不能推测通过。');
-  if(/符合要求/.test(original))clarifications.push('“符合要求”需要列出可逐项验证的条件与断言。');
-  if(clarifications.length)return {clarifications,error:'存在需澄清项；请补充明确标准后重新生成。'};
-  if(!original)return {clarifications,error:'请先填写自然语言规则描述。'};
-  const textNormalized=original.replace(/\s+/g,'').replace(/[。！!；;]$/,'');
-  const safety=textNormalized.match(/^(?:当前项目|项目)?安全DI(?:必须|应|需要)?(?:(?:等于|为|=)(0)|(?:不大于|不得大于|不能大于|<=|≤)((?:0|[1-9]\d*)(?:\.\d+)?))$/i);
-  if(safety){
-    const value=safety[1]??safety[2],number=Number(value);
-    if(!Number.isFinite(number)||number<0||number>Number.MAX_SAFE_INTEGER)return {clarifications,error:'安全 DI 阈值超出可安全表示的数字范围，不生成草稿。'};
-    return {template:'safety-di',name:`项目安全 DI ${safety[1]!==undefined?'必须为':'不大于'} ${value}`,conditions:[],assertions:[{fact:'Project.safetyDI',op:safety[1]!==undefined?'eq':'lte',value}],params:{projectCode:'order.projectCode'},message:`安全 DI 未满足${safety[1]!==undefined?'等于':'不大于'} ${value} 的要求，请核对项目数据。`,clarifications};
-  }
-  const catalog=textNormalized.match(/^商品目录(?:的|产品的|商品的)?(.+?)(?:必须|应|需要)?(?:存在且非空|存在并非空|非空|不为空)$/);
-  if(catalog){
-    const names=catalog[1].split(/[、,，/和及与]+/).filter(Boolean),lookup={'图片':'images','产品图片':'images','资料':'documents','相关资料':'documents','规格':'specifications','规格参数':'specifications','功能':'features','功能特性':'features'};
-    if(names.length&&names.every(n=>lookup[n])&&new Set(names.map(n=>lookup[n])).size===names.length)return {template:'catalog-documents',name:'商品目录资料非空检查',conditions:[{fact:'Material.inCatalog',op:'eq',value:'true'}],assertions:names.map(n=>({fact:`Product.${lookup[n]}`,op:'exists',value:''})),params:{modelCode:'material.modelCode'},message:`商品目录的${names.join('、')}缺失，请补齐后重新提交。`,clarifications};
-  }
-  if(/^后端业务部(?:提交(?:时)?)?[,，:：]?(?:软管)?最小系统(?:必须|应|需要)?(?:为)?已发布$/.test(textNormalized))return {template:'minimum-system',name:'后端业务部最小系统发布检查',conditions:[{fact:'Order.submitDepartment',op:'eq',value:'后端业务部'}],assertions:[{fact:'Minimum.status',op:'eq',value:'已发布'}],params:{projectCode:'order.projectCode',softwareCode:'row.softwareCode',version:'row.version'},message:'后端业务部提交时，当前项目、软件编码及版本的最小系统必须已发布。',clarifications};
-  return {clarifications,error:'超出支持模板，不生成猜测。当前支持：安全 DI = 0 / 不大于非负数字；商品目录明确列出的图片、资料、规格、功能非空；后端业务部最小系统已发布。请拆分复合规则或使用人工添加。'};
+ const t=String(text||'').trim().replace(/\s+/g,'').replace(/[。！!；;]$/,''),clarifications=[];
+ const di=t.match(/^(?:当前项目|项目)?安全DI(?:必须|应|需要)?(?:(?:等于|为|=)(0)|(?:不大于|不得大于|不能大于|<=|≤)((?:0|[1-9]\d*)(?:\.\d+)?))$/i);
+ if(di&&Number.isFinite(Number(di[1]??di[2])))return {template:'safety-di',name:'项目安全 DI 校验',conditions:[],assertions:[{fact:'Project.safetyDI',op:di[1]!==undefined?'eq':'lte',value:di[1]??di[2]}],params:{projectCode:'order.projectCode'},clarifications};
+ const match=t.match(/^商品目录(?:的|产品的|商品的)?(.+?)(?:必须|应|需要)?(?:存在且非空|存在并非空|非空|不为空)$/),lookup={'图片':'images','产品图片':'images','资料':'documents','相关资料':'documents','规格':'specifications','规格参数':'specifications','功能':'features','功能特性':'features'};
+ if(match){const names=match[1].split(/[、,，/和及与]+/).filter(Boolean);if(names.length&&names.every(n=>lookup[n]))return {template:'catalog-documents',name:'商品目录资料非空检查',conditions:[{fact:'Material.inCatalog',op:'eq',value:'true'}],assertions:names.map(n=>({fact:'Product.'+lookup[n],op:'exists',value:''})),params:{modelCode:'material.modelCode'},clarifications};}
+ return {template:'generic',clarifications};
 }
-// 所有引用由当前锁定对象版本中的 ruleFacts 和登记的查询映射确认。
-// Context 是本次业务查询字段，不能伪装为已经存在的全局本体属性。
-function workflowRuleAuthoringReferences(s,r,objectId){
-  const w=workflowScene(s),block=w.blocks[r.scope],main=Object.values(w.blocks).find(b=>!b.parent),properties=[],objectIds=new Set([objectId,block.object].filter(Boolean));
-  function formReference(source,fact){
-    const [origin,key]=source.split('.');
-    if(origin==='material')return ontologyReference('Material.'+key,fact,s.master);
-    const b=origin==='row'?block:main,f=b?.fields.find(f=>f.key===key);
-    if(!f)throw Error(`查询参数引用的字段 ${source} 不存在。`);
-    const bindings=(s.bindings[b.id]||[]).filter(m=>m.target===scenePrefix(s,b.id)+key),paths=[...new Set(bindings.map(m=>m.ontology))];
-    if(paths.length>1)throw Error(`字段 ${source} 对应多个本体属性，请先明确映射。`);
-    if(paths.length)return ontologyReference(paths[0],fact);
-    const direct=obj(b.object)?.props.find(p=>p.id===key);
-    if(direct)return ontologyReference(b.object+'.'+key,fact);
-    if(b.object)objectIds.add(b.object);
-    return {fact,path:source,kind:'business-form',name:f.label,type:f.type,block:b.id};
-  }
-  function ontologyReference(path,fact,capability){
-    const [oid,pid]=path.split('.'),o=obj(oid),p=o?.props.find(p=>p.id===pid);
-    if(!p)throw Error(`锁定本体版本中的属性 ${path} 不可用，请升级引用或调整映射。`);
-    objectIds.add(oid);
-    if(capability){const c=ability(capability);if(!c?.maps.some(m=>m.target===path))throw Error(`查询 ${capability} 未提供本体属性 ${path}。`);}
-    return {fact,path,kind:'ontology-property',name:p.name,type:p.type,object:oid,version:s.ontologyVersions?.[oid]||null,...(capability?{capability}:{})};
-  }
-  for(const clause of [...r.conditions,...r.assertions]){
-    const f=ruleFact(s,r,clause.fact);if(!f)throw Error(`当前适用对象 / 区块没有可用属性 ${clause.fact}。`);
-    if(f.capability){
-      const c=ability(f.capability);
-      if(!c||!connector(c.connector)?.enabled)throw Error(`查询 ${f.capability} 或系统连接不可用。`);
-      let ref;
-      if(c.object==='Context'){
-        const path='Context.'+f.output;
-        if(!c.maps.some(m=>m.target===path))throw Error(`查询 ${c.id} 未提供属性 ${path}。`);
-        ref={fact:f.id,path,kind:'business-context',name:f.name,type:f.type,capability:c.id,queryRevision:c.revision};
-      }else{
-        ref=ontologyReference(f.id,f.id,c.id);
-        if(ref.type!==f.type)throw Error(`本体属性 ${f.id} 类型与规则事实不一致。`);
-      }
-      properties.push(ref);
-      for(const [key]of c.params||[]){
-        const source=r.params[key]||(c.id===s.master&&key==='materialCode'?'row.materialCode':'');
-        if(!source)throw Error(`请明确查询参数 ${key} 的取值来源。`);
-        properties.push({...formReference(source,`parameter.${key}`),source,parameter:key});
-      }
-    }else if(f.source)properties.push(formReference(f.source,f.id));
-    else throw Error(`属性 ${f.id} 未登记来源。`);
-  }
-  for(const id of objectIds){
-    const o=obj(id);if(!o?.props.length)throw Error(`适用本体对象 ${id} 没有可用的锁定属性。`);
-    if(typeof objectReleaseVersion==='function'&&!objectReleaseVersion(id,s.ontologyVersions?.[id]))throw Error(`本体对象 ${id} 未锁定已发布版本。`);
-  }
-  return {objects:[...objectIds].map(id=>({id,name:obj(id).name,version:s.ontologyVersions?.[id]||null})),properties:properties.filter((p,i,all)=>all.findIndex(x=>x.fact===p.fact&&x.path===p.path)===i)};
-}
+function workflowRuleAuthoringReferences(s,r){if(r.ruleCard)return sceneRuleCardReferences(s,r);if(r.ontologyChain)return sceneRuleChainReferences(s,r);return {objects:[],properties:[]};}
 function workflowRuleAuthoringAllowed(d,type){
-  const s=scene();
-  if(!s||workflowScene(s).type!=='draft'||typeof sceneReleaseCanEdit!=='function'||!sceneReleaseCanEdit(s)){
-    if(d)errorDrawer('仅智能提单编辑中的草稿 / 修订可以配置规则。');else toast('请先进入智能提单场景编辑。');return false;
-  }
-  if(d&&(d.type!==type||d.authoringSceneId!==s.id||d.releaseOwnerScene!==s.id)){
-    errorDrawer('场景已切换或草稿不属于当前场景，请关闭后重新打开。');return false;
-  }
-  return true;
+ const s=scene();if(!s||workflowScene(s).type!=='draft'||!sceneReleaseCanEdit(s)){if(d)errorDrawer('仅智能提单编辑中的草稿 / 修订可以配置规则。');else toast('请先进入智能提单场景编辑。');return false;}
+ if(d&&(d.type!==type||d.authoringSceneId!==s.id||d.releaseOwnerScene!==s.id)){errorDrawer('场景已切换或草稿不属于当前场景，请关闭后重新打开。');return false;}return true;
 }
-function workflowRuleAuthoringOpen(){
-  if(!workflowRuleAuthoringAllowed(null))return;
-  const s=scene();openDrawer('workflowRuleAuthoring',{originalText:'',objectId:'',scope:''},{authoringSceneId:s.id,releaseOwnerScene:s.id,generated:null,generatedFingerprint:null,clarifications:[]});
+function workflowRuleAuthoringAnalyze(s,text){return workflowRuleAuthoringContext(s,()=>sceneRuleIntentAnalyze(s,text));}
+function workflowRuleAuthoringEmptyCard(text=''){return {text:String(text).trim(),intent:'',references:[{id:'ref-1',mention:'校验属性',path:'',object:'',property:'',name:'',type:'',kind:'ontology-property',role:'assertion',candidates:[]}],conditions:[],assertions:[{reference:'ref-1',op:'exists',value:''}],queries:[],scope:'',logic:'and',unknown:'block',clarifications:[],unsupported:[],blockingClarifications:[]};}
+function workflowRuleAuthoringOpen(){if(!workflowRuleAuthoringAllowed(null))return;const s=scene();openDrawer('workflowRuleAuthoring',{originalText:'',scope:'',card:workflowRuleAuthoringEmptyCard()},{authoringSceneId:s.id,releaseOwnerScene:s.id,generated:null,generatedFingerprint:null,clarifications:[]});}
+function workflowRuleAuthoringLoadExample(el){
+ const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;
+ const examples=workflowRuleAuthoringExamples(scene()),example=examples.find(x=>x.id===(el?.dataset?.example||'required'));if(!example)return toast('当前流程单没有该类型的已映射字段 / 接口，请先补齐映射和接口契约。');
+ d.draft.originalText=example.text;d.draft.card=workflowRuleAuthoringAnalyze(scene(),d.draft.originalText);d.draft.scope=d.draft.card.scope||'';workflowRuleAuthoringInvalidate(d);workflowRuleAuthoringRefresh(el);
+}
+function workflowRuleAuthoringInvalidate(d){d.generated=null;d.generatedFingerprint=null;d.clarifications=[];d.error='';d.dirty=true;}
+// 规则抽屉原位更新：保留壳、滚动容器、已存在控件与 details 状态，不重新播放抽屉动画。
+const workflowRuleAuthoringUIKeys=new WeakMap();let workflowRuleAuthoringUISequence=0;
+function workflowRuleAuthoringUIKey(value,prefix){if(!workflowRuleAuthoringUIKeys.has(value))workflowRuleAuthoringUIKeys.set(value,prefix+'-'+(++workflowRuleAuthoringUISequence));return workflowRuleAuthoringUIKeys.get(value);}
+function workflowRuleAuthoringNodeKey(node){
+ if(node.nodeType!==1)return '';
+ const key=node.getAttribute('data-rule-key');if(key)return node.tagName+':'+key;
+ if(node.tagName==='DETAILS')return 'DETAILS:'+(node.getAttribute('data-rule-card-advanced')!==null?'advanced':node.querySelector('summary')?.textContent||'');
+ let parent=node.parentNode,stableScope=false;while(parent){if(parent.nodeType===1&&parent.hasAttribute('data-rule-key')){stableScope=true;break;}parent=parent.parentNode;}
+ const attrs=Array.from(node.attributes).filter(a=>(!stableScope||a.name!=='data-index')&&(a.name.startsWith('data-')||a.name==='id'));return attrs.length?node.tagName+':'+attrs.map(a=>a.name+'='+(stableScope&&/^data-card-/.test(a.name)&&/^\d+$/.test(a.value)?'*':a.value)).sort().join('|'):'';
+}
+function workflowRuleAuthoringPatchNode(current,next){
+ if(current.nodeType!==next.nodeType||current.nodeType===1&&current.tagName!==next.tagName){current.replaceWith(next.cloneNode(true));return;}
+ if(current.nodeType!==1){if(current.nodeValue!==next.nodeValue)current.nodeValue=next.nodeValue;return;}
+ for(const attr of Array.from(current.attributes))if(!(current.tagName==='DETAILS'&&attr.name==='open')&&!next.hasAttribute(attr.name))current.removeAttribute(attr.name);
+ for(const attr of Array.from(next.attributes))if(!(current.tagName==='DETAILS'&&attr.name==='open')&&current.getAttribute(attr.name)!==attr.value)current.setAttribute(attr.name,attr.value);
+ if(!['INPUT','TEXTAREA'].includes(current.tagName))workflowRuleAuthoringPatchChildren(current,next);
+ if(['INPUT','SELECT','TEXTAREA'].includes(current.tagName)){
+  if(current.value!==next.value)current.value=next.value;
+  if(current.disabled!==next.disabled)current.disabled=next.disabled;
+  if(current.tagName==='INPUT'&&current.checked!==next.checked)current.checked=next.checked;
+ }
+}
+function workflowRuleAuthoringPatchChildren(current,next){
+ const old=Array.from(current.childNodes),keyed=new Map(old.map(node=>[workflowRuleAuthoringNodeKey(node),node]).filter(([key])=>key)),used=new Set();let cursor=current.firstChild;
+ for(const wanted of Array.from(next.childNodes)){
+  const key=workflowRuleAuthoringNodeKey(wanted);let node=key?keyed.get(key):old.find(n=>!used.has(n)&&!workflowRuleAuthoringNodeKey(n)&&n.nodeType===wanted.nodeType&&(n.nodeType!==1||n.tagName===wanted.tagName));
+  if(node&&used.has(node))node=null;
+  if(!node){node=wanted.cloneNode(true);current.insertBefore(node,cursor);}else{if(node!==cursor)current.insertBefore(node,cursor);workflowRuleAuthoringPatchNode(node,wanted);}
+  used.add(node);cursor=node.nextSibling;
+ }
+ for(const node of old)if(!used.has(node)&&node.parentNode===current)current.removeChild(node);
+}
+function workflowRuleAuthoringRefresh(el=null){
+ const d=state.drawer;if(d?.type!=='workflowRuleAuthoring')return;
+ const confirm=overlayRoot.querySelector('[data-action="workflow-rule-confirm"]');if(confirm){confirm.disabled=!d.generated;confirm.setAttribute('aria-disabled',String(!d.generated));}
+ const body=overlayRoot.querySelector('.drawer-body'),intent=overlayRoot.querySelector('[data-rule-intent-preview]');
+ if(!body||!intent||typeof document.createElement!=='function')return;
+ const scrollTop=body.scrollTop,scrollLeft=body.scrollLeft,active=document.activeElement,anchor=el&&body.contains(el)&&el.getBoundingClientRect?{node:el,top:el.getBoundingClientRect().top}:null;
+ const patch=(target,html)=>{if(!target)return;const template=document.createElement('template');template.innerHTML=html;workflowRuleAuthoringPatchChildren(target,template.content);};
+ workflowRuleAuthoringContext(scene(),()=>patch(intent,workflowRuleAuthoringStepsHTML(d.draft.card)+workflowRuleAuthoringCardHTML(scene(),d.draft)));
+ const preview=overlayRoot.querySelector('[data-rule-authoring-preview]');patch(preview,d.generated?`${inf('结构化草稿已生成，尚未保存。请核对后人工确认。','green')}<details class="plain-details section-gap"><summary>查看结构化规则（供核对）</summary>${jsonView(d.generated.ruleCard)}</details>`:'<p class="tiny muted">规则内容已修改，须重新生成；尚未保存。</p>');
+ let error=body.querySelector('[data-rule-authoring-error]')||body.querySelector(':scope > .error');if(!error&&d.error){error=document.createElement('div');error.className='error';error.setAttribute('role','alert');error.setAttribute('data-rule-authoring-error','');body.insertBefore(error,body.firstChild);}if(error){if(d.error)error.textContent=d.error;else error.remove();}
+ const input=body.querySelector('[data-field="originalText"]');if(input&&input!==active&&input.value!==d.draft.originalText)input.value=d.draft.originalText;
+ if(active&&body.contains(active)&&document.activeElement!==active)active.focus({preventScroll:true});
+ body.scrollTop=scrollTop;body.scrollLeft=scrollLeft;
+ if(anchor&&body.contains(anchor.node))body.scrollTop+=anchor.node.getBoundingClientRect().top-anchor.top;
+}
+function workflowRuleAuthoringInlineError(message,el=null){state.drawer.error=message;workflowRuleAuthoringRefresh(el);}
+function workflowRuleAuthoringExamples(s){
+ const paths=workflowRuleAuthoringPaths(s),examples=[],first=paths[0],number=paths.find(p=>p.type==='数字'),date=paths.find(p=>p.type==='日期'),text=paths.find(p=>['文本','枚举','引用'].includes(p.type));
+ if(first)examples.push({id:'required',label:'当前流程单 · 必填示例',text:first.path+'不能为空'});
+ if(number)examples.push({id:'threshold',label:'当前流程单 · 阈值示例',text:number.path+'大于0'});
+ if(date)examples.push({id:'date',label:'当前流程单 · 日期示例',text:date.path+'不小于2026-01-01'});
+ if(text)examples.push({id:'text',label:'当前流程单 · 文本示例',text:text.path+'包含“业务”'});
+ const queries=capabilities.filter(c=>c.object==='Context'&&connector(c.connector)?.enabled&&c.maps?.some(m=>m.sourceType)&&c.params?.every(p=>{const name=Array.isArray(p)?p[0]:p.name;return paths.filter(x=>x.property===name).length===1;}));
+ const query=queries[0],map=query?.maps.find(m=>m.sourceType);if(query&&map)examples.push({id:'interface',label:'当前流程单 · 接口示例',text:'调用'+query.id+'接口，返回'+map.target+(map.sourceType==='数字'?'大于0':map.sourceType==='布尔'?'等于true':'不能为空')});const direct=capabilities.find(c=>c.validationResult&&connector(c.connector)?.enabled&&c.params.every(p=>{const d=sceneRuleCardParam(p);return paths.filter(x=>d.target?x.path===d.target:x.property===d.name).length===1;}));if(direct)examples.push({id:'decision',label:'当前流程单 · 通过 / 不通过示例',text:'调用'+direct.id+'接口，返回通过/不通过'});return examples;
+}
+function workflowRuleAuthoringPaths(s){return sceneRuleCardMappedProperties(s);}
+function workflowRuleAuthoringResolveMappings(s,c,scope){
+ c.scope=scope||c.scope;c.mappingScope='scene-bindings';
+ for(const ref of c.references||[]){if(ref.kind==='business-form')throw Error('该字段未映射到本体属性，请先在“对象与表单映射”配置：'+ref.path);if(ref.kind!=='ontology-property'||!ref.path)continue;const mapped=workflowRuleAuthoringPaths(s).find(p=>p.path===ref.path);if(!mapped)throw Error('该本体属性未参与当前场景映射，请先在“对象与表单映射”配置：'+ref.path);const resolved=sceneRuleCardMappedSource(s,c.scope,ref.path);if(resolved.error)throw Error(resolved.error);ref.source=resolved.source;delete ref.query;delete ref.output;delete ref.capability;}
+ for(const q of c.queries||[])for(const p of q.params||[]){if(p.reference){delete p.source;continue;}if(p.source){const src=sceneRuleCardSource(s,c.scope,p.source),paths=[...new Set(src?.bindings.map(b=>b.ontology)||[])],path=paths.length===1&&paths[0],ref=c.references.find(r=>r.kind==='ontology-property'&&r.path===path);if(!ref)throw Error('接口入参必须使用已映射的本体属性，请确认入参 '+p.name);p.reference=ref.id;delete p.source;}}
+ // 移除不再被条件、断言或其接口依赖使用的查询，避免另行维护本体取数。
+ const used=new Set(),visit=id=>{if(used.has(id))return;used.add(id);for(const p of (c.queries||[]).find(q=>q.id===id)?.params||[]){const ref=c.references.find(r=>r.id===p.reference);if(ref?.query)visit(ref.query);}};for(const ref of c.references||[])if(ref.query)visit(ref.query);c.queries=(c.queries||[]).filter(q=>used.has(q.id));return c;
+}
+function workflowRuleAuthoringCompile(s,v){
+ const c=structuredClone(v.card);if(!c)throw Error('请先完成规则卡配置，或通过自然语言快捷填充。');
+ if(c.text!==String(v.originalText).trim())throw Error('原文与解析卡不一致，请重新输入描述并解析。');
+ const blocking=[...(c.unsupported||[]),...(c.blockingClarifications||[])].map(x=>typeof x==='string'?x:x.message).filter(Boolean);if(blocking.length)throw Error('仍有无法确定的规则意图：'+blocking.join('；'));
+ c.scope=v.scope||c.scope;c.logic='and';c.unknown='block';
+ if(c.queries.some(q=>q.endpointInput))throw Error('接口地址尚未匹配已登记契约，请先登记接口或选择可用接口。');
+ if(c.validationMethod==='local'&&(c.queries.length||c.assertions.some(a=>!['matches','notMatches'].includes(a.op))))throw Error('本地校验必须选择本体对象 / 属性并配置正则表达式。');
+ if(c.validationMethod==='interface'&&(!c.queries.length||c.assertions.some(a=>!c.references.find(r=>r.id===a.reference)?.query)))throw Error('接口校验必须配置接口及返回判定。');
+ workflowRuleAuthoringResolveMappings(s,c,c.scope);
+ for(const a of [...(c.conditions||[]),...(c.assertions||[])]){if(a.valueReference||['exists','notExists'].includes(a.op))continue;const ref=c.references.find(r=>r.id===a.reference);const convert=value=>ref?.type==='数字'&&typeof value==='string'&&/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value.trim())?Number(value):ref?.type==='布尔'&&['true','false'].includes(value)?value==='true':value;a.value=Array.isArray(a.value)?a.value.map(convert):convert(a.value);}
+ if(c.references.some(r=>!r.path))throw Error('部分对象或属性仍待确认，请在通用规则卡中选择。');
+ const clauses=kind=>(c[kind]||[]).map(a=>({fact:a.reference,op:a.op,value:a.value??'',...(a.valueReference?{valueReference:a.valueReference}:{}),...(a.flags?{flags:a.flags}:{})}));
+ const r={id:'',name:c.name||String(v.originalText).trim().slice(0,50)||'业务校验规则',scope:c.scope,trigger:'submit',enabled:false,active:'停用',level:c.level||'阻断',message:c.message||'业务校验不满足要求，请按规则核对数据后重试。',conditions:clauses('conditions'),assertions:clauses('assertions'),params:{},ruleCard:c};
+ const issue=sceneRuleCardValidate(s,r);if(issue)throw Error(issue);return r;
 }
 function workflowRuleAuthoringGenerate(){
-  const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;
-  d.generated=null;d.generatedFingerprint=null;d.clarifications=[];d.error='';
-  const s=scene(),v=d.draft,parsed=workflowRuleAuthoringParse(v.originalText);d.clarifications=parsed.clarifications;
-  if(parsed.error)return errorDrawer(parsed.error);
-  try{
-    workflowRuleAuthoringContext(s,()=>{
-      if(!workflowRuleAuthoringObjects(s).some(o=>o.id===v.objectId))throw Error('请选择确切的适用本体对象。');
-      const blocks=workflowRuleAuthoringBlocks(s,v.objectId);
-      if(!v.scope)throw Error(blocks.length>1?'存在多个适用区块，请明确选择执行区块；不会自动取第一个。':'请选择适用的执行区块。');
-      if(!blocks.some(b=>b.id===v.scope))throw Error('所选区块不适用于当前本体对象。');
-      const r={id:'',name:parsed.name,scope:v.scope,trigger:'submit',conditions:parsed.conditions,assertions:parsed.assertions,params:parsed.params,enabled:false,active:'停用',level:'阻断',message:parsed.message};
-      const refs=workflowRuleAuthoringReferences(s,r,v.objectId),error=validateWorkflowRule(s,r);
-      if(error)throw Error(error);
-      do{r.id=`rule-nl-${++workflowRuleAuthoringSequence}`;}while(Object.values(appScenes).some(s=>s.workflow?.rules.some(x=>x.id===r.id)));
-      r.naturalLanguage={engine:'local-controlled-parser',originalText:v.originalText,template:parsed.template,sceneId:s.id,scope:v.scope,selectedObject:v.objectId,...refs,reviewStatus:'generated-awaiting-human-review',correspondence:'template-draft',generatedStructure:workflowRuleAuthoringStructure(r)};
-      d.generated=structuredClone(r);d.generatedFingerprint=workflowRuleAuthoringFingerprint(s,v);d.dirty=true;
-    });
-  }catch(e){d.generated=null;d.generatedFingerprint=null;d.error=e.message;}
-  drawOverlay();
+ const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;workflowRuleAuthoringInvalidate(d);
+ try{const s=scene();if(!d.draft.card)d.draft.card=workflowRuleAuthoringAnalyze(s,d.draft.originalText);const r=workflowRuleAuthoringContext(s,()=>workflowRuleAuthoringCompile(s,d.draft));
+ do{r.id='rule-nl-'+(++workflowRuleAuthoringSequence);}while(Object.values(appScenes).some(s=>s.workflow?.rules.some(x=>x.id===r.id)));
+ const refs=workflowRuleAuthoringContext(s,()=>workflowRuleAuthoringReferences(s,r));r.naturalLanguage={engine:'local-controlled-parser',template:d.draft.card.template||'generic',originalText:d.draft.originalText,sceneId:s.id,scope:r.scope,...refs,intent:d.draft.card.intent,authoringInput:structuredClone(d.draft),reviewStatus:'generated-awaiting-human-review',correspondence:'template-draft',generatedStructure:workflowRuleAuthoringStructure(r)};
+ d.generated=r;d.generatedFingerprint=workflowRuleAuthoringFingerprint(s,d.draft);
+ }catch(e){d.error=e.message;d.clarifications=[e.message];}workflowRuleAuthoringRefresh();
 }
 function workflowRuleAuthoringConfirm(){
-  const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;
-  if(!d.generated||d.clarifications.length)return errorDrawer('请先生成无待澄清项的结构化草稿。');
-  const s=scene();
-  if(d.generatedFingerprint!==workflowRuleAuthoringFingerprint(s,d.draft)){d.generated=null;return errorDrawer('原文、场景、来源或本体快照已变化，请重新生成并核对。');}
-  try{workflowRuleAuthoringContext(s,()=>{
-    const r=structuredClone(d.generated);workflowRuleAuthoringReferences(s,r,d.draft.objectId);
-    const error=validateWorkflowRule(s,r);if(error)throw Error(error);
-    r.naturalLanguage.reviewStatus='human-confirmed-awaiting-save';
-    openDrawer('workflowRule',r,{isNew:true,authoringSceneId:s.id,releaseOwnerScene:s.id,authoringInput:structuredClone(d.draft),authoringFingerprint:d.generatedFingerprint,authoringProvenance:structuredClone(r.naturalLanguage)});
-  });}catch(e){errorDrawer(e.message);}
+ const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;if(!d.generated)return errorDrawer('请先补齐通用规则卡并生成结构化草稿。');
+ if(d.generatedFingerprint!==workflowRuleAuthoringFingerprint(scene(),d.draft)){d.generated=null;return errorDrawer('原文、规则卡、场景、接口或本体版本已变化，请重新生成。');}
+ try{const r=structuredClone(d.generated),error=workflowRuleAuthoringContext(scene(),()=>sceneRuleCardValidate(scene(),r));if(error)throw Error(error);r.naturalLanguage.reviewStatus='human-confirmed-awaiting-save';openDrawer('workflowRule',r,{isNew:true,authoringSceneId:scene().id,releaseOwnerScene:scene().id,authoringInput:structuredClone(d.draft),authoringFingerprint:d.generatedFingerprint,authoringProvenance:structuredClone(r.naturalLanguage)});}catch(e){errorDrawer(e.message);}
 }
-function workflowRuleAuthoringProvenanceHTML(meta){
-  if(!meta)return '';
-  return `<div class="inset-panel section-gap"><div class="between"><h3>自然语言来源</h3>${pill(meta.correspondence==='structured-edited'?'已人工调整':'需人工核对','blue')}</div><p class="section-gap">${esc(meta.originalText)}</p><p class="tiny muted section-gap">本地受控解析 · ${esc(meta.template)} · 原文仅作为来源记录。结构化编辑后以当前条件、断言和参数为准，不宣称仍完全对应原文。</p></div>`;
+function workflowRuleAuthoringMode(c){return c.validationMethod||(c.queries?.length?'interface':c.assertions?.some(a=>['matches','notMatches'].includes(a.op))?'local':'comparison');}
+function workflowRuleAuthoringEndpoint(c){if(!c)return '';const resource=c.resource||'',base=connector(c.connector)?.endpoint||'';return /^https?:\/\//.test(resource)?resource:resource.startsWith('/')?base.replace(/\/$/,'')+resource:resource;}
+function workflowRuleAuthoringDecisionHTML(c,q,i,readOnly=false){
+ const disabled=readOnly?' disabled':'',control=(key,label)=>{const value=q[key];return `<div class="form-field"><label>${label}</label>${sceneRuleCardType(q.type)==='布尔'?`<select aria-label="${label} ${i+1}" data-card-decision="${i}" data-key="${key}"${disabled}>${options([['','请选择'],['true','true'],['false','false']],value===undefined?'':String(value))}</select>`:`<input aria-label="${label} ${i+1}" data-card-decision="${i}" data-key="${key}" value="${esc(value===undefined?'':value)}" placeholder="${key==='passValue'?'例如：通过':'例如：不通过'}"${disabled}>`}</div>`;};
+ return `<div class="rule-decision-panel section-gap"><b class="rule-section-label">接口返回判定 · 直接结论</b><p class="tiny muted section-gap">接口结果不属于本体属性，无需选择被校验的本体对象；只需确认返回值对应的业务结论。</p><div class="form-grid section-gap">${control('passValue','通过值')}${control('failValue','不通过值')}</div><p class="tiny section-gap">${esc(q.passValue===undefined?'待确认':String(q.passValue))} → 通过　 ·　 ${esc(q.failValue===undefined?'待确认':String(q.failValue))} → 不通过</p><p class="tiny muted section-gap">其他值、空值、类型错误或接口超时均为未知并阻断。HTTP 成功不代表业务通过。</p></div>`;
 }
-const workflowRuleAuthoringViewBefore=workflowRulesView;
-workflowRulesView=function(s){
-  const old=workflowRuleAuthoringViewBefore(s);if(workflowScene(s).type!=='draft')return old;
-  let html=old.replace('<h3>校验规则</h3>','<h3>规则配置</h3>');
-  html=html.replace(btn('添加规则','workflow-add-rule','sm','plus'),`<div class="row">${btn('自然语言生成规则','workflow-rule-authoring','sm primary','plus')}${btn('添加规则','workflow-add-rule','sm','plus')}</div>`);
-  html=html.replace('<div class="section-gap">',`<div class="section-gap">${inf('自然语言描述 → 本体对象 / 属性匹配 → 结构化草稿 → 人工确认修改保存。本地受控解析，不是真实 AI；未确认不保存，保存不执行，生成规则默认停用。')}</div><div class="section-gap">`);
-  for(const r of workflowScene(s).rules)if(r.naturalLanguage){const marker=`<h3>${esc(r.name)}</h3>`;html=html.replace(marker,marker+pill(r.naturalLanguage.correspondence==='structured-edited'?'已人工调整':'人工已确认','blue'));}
-  if(typeof sceneReleaseGuardHTML==='function')html=sceneReleaseGuardHTML(html);
-  return html;
-};
+function workflowRuleAuthoringQueryHTML(s,c,readOnly=false){
+ const disabled=readOnly?' disabled':'',paths=workflowRuleAuthoringPaths(s),registered=capabilities.filter(c=>c.object==='Context'&&c.enabled!==false&&connector(c.connector)?.enabled);
+ return (c.queries||[]).map((q,i)=>{const cap=ability(q.capability),outputs=(cap?.maps||[]).filter(m=>m.target.startsWith('Context.')),refs=c.references.filter(r=>r.query===q.id),direct=!!cap?.validationResult,decision=q.resultMode==='decision';
+ return `<article class="rule-interface-panel section-gap" data-rule-key="${esc(q.id)}"><div class="between"><b>接口校验节点 ${i+1}</b>${readOnly?'':btn('移除接口','workflow-rule-card-remove-query','sm','',`data-index="${i}"`)}</div><div class="form-grid section-gap"><div class="form-field wide"><label>校验接口</label><select aria-label="校验接口 ${i+1}" data-card-query="${i}" data-key="capability"${disabled}>${options([['','选择已登记校验接口'],...registered.map(c=>[c.id,c.name+' · '+c.id])],q.capability)}</select></div><div class="form-field wide"><label>接口地址 / 登记标识</label><input aria-label="接口地址 / 登记标识 ${i+1}" data-card-endpoint="${i}" value="${esc(q.endpointInput||workflowRuleAuthoringEndpoint(cap))}" placeholder="填写已登记的接口 ID 或完整地址"${disabled}><small>${cap?.method==='本地演示'?'当前为本地演示契约，尚未接入真实接口。':'地址与入参来自接口登记契约；未知地址需先登记，不会直接调用。'}</small></div></div><div class="rule-section-label section-gap">接口入参 · 对象 / 属性</div>${(q.params||[]).map((p,j)=>{const ref=c.references.find(r=>r.id===p.reference);return `<div class="form-field section-gap" data-rule-key="param-${esc(p.name)}"><label>${esc(p.name)}</label><select aria-label="入参 ${esc(p.name)} · 对象 / 属性" data-card-param-path="${i}" data-index="${j}"${disabled}>${options([['','选择入参对应的本体对象 / 属性'],...paths.map(p=>[p.path,p.objectName+' / '+p.name+' · '+p.path])],ref?.path||'')}</select></div>`;}).join('')||(cap?'<p class="tiny muted section-gap">该登记接口无需入参。</p>':'<p class="tiny muted section-gap">选择接口后展示所需入参。</p>')}<div class="form-field section-gap"><label>接口返回方式</label><select aria-label="接口返回方式 ${i+1}" data-card-result-mode="${i}"${disabled}${direct?' disabled':''}>${options(direct?[['decision','直接返回通过 / 不通过']]:[['data','返回业务数据后判断'],['decision','直接返回通过 / 不通过']],decision?'decision':'data')}</select><small>${direct?'已登记结论契约：'+esc(cap.validationResult.source==='$'?'响应体直接返回':cap.validationResult.source)+' · '+esc(cap.validationResult.type):'出参无需映射为本体，按接口结果契约判断。'}</small></div>${direct?'':refs.map(r=>{const ri=c.references.indexOf(r);return `<div class="form-grid section-gap" data-rule-key="output-${esc(r.id)}"><div class="form-field"><label>返回属性 / 路径</label><select aria-label="返回属性 / 路径 ${i+1}" data-card-ref="${ri}" data-key="output"${disabled}>${options([['','选择返回属性'],...outputs.map(m=>[m.target.slice(8),m.source+' → '+m.target.slice(8)])],r.output||'')}</select></div><div class="form-field"><label>返回类型</label><select aria-label="返回类型 ${i+1}" data-card-ref="${ri}" data-key="type"${disabled}>${options([['','待确认'],...['文本','数字','布尔','日期','集合'].map(t=>[t,t])],r.type||'')}</select></div></div>`;}).join('')}${decision?workflowRuleAuthoringDecisionHTML(c,q,i,readOnly):'<p class="tiny muted section-gap">接口成功不等于校验通过；请在下方明确返回数据要达到的状态。</p>'}</article>`;
+ }).join('');
+}
+function workflowRuleAuthoringCardHTML(s,v,readOnly=false){
+ const c=v.card||workflowRuleAuthoringEmptyCard(),mode=workflowRuleAuthoringMode(c),disabled=readOnly?' disabled':'',paths=workflowRuleAuthoringPaths(s),refName=id=>{const r=c.references.find(r=>r.id===id),p=paths.find(p=>p.path===r?.path);return p?(p.objectName+' / '+p.name):r?.name||r?.mention||'待选择';};
+ const choices=[['','请选择本体对象 / 属性'],...paths.map(p=>[p.path,p.objectName+' / '+p.name]),...c.references.filter(r=>r.kind==='business-context'&&r.path).map(r=>[r.path,'接口结果 / '+r.name])];
+ const rows=kind=>(c[kind]||[]).map((a,i)=>{const r=c.references.find(r=>r.id===a.reference),q=c.queries.find(q=>q.id===r?.query);if(kind==='assertions'&&q?.resultMode==='decision')return '';const regex=['matches','notMatches'].includes(a.op),exists=['exists','notExists'].includes(a.op),other=!!a.valueReference,local=kind==='assertions'&&mode==='local',allowed=local?['matches','notMatches']:r?.type==='布尔'?['eq','neq','exists','notExists']:['数字','日期'].includes(r?.type)?['eq','neq','gt','gte','lt','lte','exists','notExists','in','notIn','between']:['eq','neq','exists','notExists','in','notIn','contains','notContains','startWith','endWith'];const ops=workflowRuleCardOperators.filter(([id])=>allowed.includes(id)||id===a.op),control=(label,html)=>`<div class="rule-clause-field" data-rule-key="${esc(label)}"><label>${label}</label>${html}</div>`;
+ const attribute=kind==='assertions'&&r?.query?control('接口返回字段',`<div class="rule-output-label">${esc(r.name||r.output||'待选择接口返回字段')}<small>${esc(r.output||'请先确认上方返回属性 / 路径')}</small></div>`):control(kind==='conditions'?'条件本体对象 / 属性':'被校验对象 / 属性',`<select aria-label="${kind==='conditions'?'适用条件':'校验要求'}属性 ${i+1}" data-card-choice="${kind}" data-index="${i}"${disabled}>${options(local?choices.filter(([path])=>!path.startsWith('Context.')):choices,r?.path||'')}</select>`);
+ const operation=control(kind==='conditions'?'条件判断':'达到的状态',`<select aria-label="${kind==='conditions'?'判断方式':'达到的状态'} ${i+1}" data-card-clause="${kind}" data-index="${i}" data-key="op"${disabled}>${options(ops,a.op)}</select>`);
+ const literal=exists?'':control(regex?'正则表达式':kind==='conditions'?'条件值':'目标值 / 状态',other?`<select aria-label="比较属性 ${i+1}" data-card-clause="${kind}" data-index="${i}" data-key="valueReference"${disabled}>${options(c.references.filter(r=>r.id!==a.reference).map(r=>[r.id,refName(r.id)]),a.valueReference)}</select>`:r?.type==='布尔'&&!regex?`<select aria-label="比较值 ${i+1}" data-card-clause="${kind}" data-index="${i}" data-key="value"${disabled}>${options([['','请选择'],['true','是'],['false','否']],String(a.value??''))}</select>`:`<input aria-label="${regex?'正则表达式':'比较值'} ${i+1}" data-card-clause="${kind}" data-index="${i}" data-key="value" type="${r?.type==='日期'&&a.op!=='between'&&!regex?'date':'text'}" value="${esc(Array.isArray(a.value)?a.value.join('，'):a.value??'')}" placeholder="${regex?'例如：^MAT-[0-9]{6}$':['in','notIn','between'].includes(a.op)?'多个值用逗号分隔':'填写要达到的值'}"${disabled}>`);
+ return `<div class="rule-simple-clause section-gap" data-rule-key="${workflowRuleAuthoringUIKey(a,kind)}">${attribute}${operation}${literal}${readOnly?'':btn('移除','workflow-rule-card-remove','sm','',`data-kind="${kind}" data-index="${i}"`)}</div>`;
+ }).join('');
+ return `<section class="inset-panel section-gap rule-config-card" data-rule-card-basic><div class="between"><h3>通用规则卡</h3>${pill(readOnly?'待确认':'自动预填 · 可编辑','blue')}</div><div class="rule-config-section" data-rule-key="conditions"><div class="between"><h4>3 · 条件本体对象 / 属性</h4>${readOnly?'':btn('增加条件','workflow-rule-card-add-clause','sm','plus','data-kind="conditions"')}</div><p class="tiny muted section-gap">什么情况下检查：本体对象与属性合并选择，可添加多个；全部条件满足后执行校验。</p>${rows('conditions')||'<p class="rule-empty-note section-gap">没有前置条件，始终检查。</p>'}</div><div class="rule-config-section" data-rule-key="validation"><h4>4 · 校验配置</h4><div class="form-field section-gap"><label>校验方式</label><select aria-label="校验方式" data-card-validation-mode${disabled}>${options([['','请选择校验方式'],['interface','接口校验'],['local','本地校验 · 正则表达式']],mode==='comparison'?'':mode)}</select></div>${mode==='interface'?workflowRuleAuthoringQueryHTML(s,c,readOnly):''}<div class="between section-gap"><b class="rule-section-label">${mode==='local'?'本地正则校验':mode==='interface'?'接口返回判定':'检查什么 · 已解析的校验要求'}</b>${readOnly?'':btn(mode==='interface'?'增加接口':'增加检查项',mode==='interface'?'workflow-rule-card-add-query':'workflow-rule-card-add-clause','sm','plus','data-kind="assertions"')}</div>${rows('assertions')||(c.assertions.some(a=>c.queries.find(q=>q.id===c.references.find(r=>r.id===a.reference)?.query)?.resultMode==='decision')?'':'<p class="tiny muted section-gap">请增加至少一项检查要求。</p>')}${mode==='local'?'<p class="tiny muted section-gap">正则仅用于文本类属性；填写表达式本身，无需 / 分隔符。匹配 / 不匹配表示通过状态，使用 ^ 与 $ 可限定完整内容。仅支持安全子集（字符组、锚点、量词等），不支持分组、分支或反向引用；表达式最多 256 字符，文本最多 2048 字符。</p>':mode==='comparison'?'<p class="tiny muted section-gap">保留自然语言已解析的必填、数值和状态比较；也可选择上方方式切换为接口或正则校验。</p>':''}</div><div class="rule-config-section" data-rule-key="failure"><h4>未通过怎么办</h4><div class="form-grid section-gap"><div class="form-field"><label>处理方式</label><select aria-label="处理方式" data-card-setting="level"${disabled}>${options([['阻断','拦截提交'],['警告','提醒但允许继续']],c.level||'阻断')}</select></div><div class="form-field"><label>给用户的提示（选填）</label><input aria-label="给用户的提示" data-card-setting="message" value="${esc(c.message||'')}" placeholder="例如：请补齐信息后重新提交"${disabled}></div></div><p class="tiny muted section-gap">空值、超时与未知结果默认阻断，不会自动放行。</p></div></section><details class="plain-details section-gap" data-rule-card-advanced><summary>高级核对 · 执行范围与属性比较（按需）</summary><p class="tiny muted section-gap">取值自动沿用当前流程单映射；多区块或属性间比较时再核对。</p>${workflowRuleAuthoringAdvancedHTML(s,v,readOnly)}</details>`;
+}
+function workflowRuleAuthoringAdvancedHTML(s,v,readOnly=false){
+ const c=v.card;if(!c)return '<div class="inset-panel section-gap"><h3>通用规则卡</h3><p class="tiny muted section-gap">输入自然语言后，自动解析规则意图并预填涉及的对象、属性和校验要求。未识别内容保留待确认，不生成猜测。</p></div>';
+ const paths=workflowRuleAuthoringPaths(s),refs=c.references||[],disabled=readOnly?' disabled':'';
+ const select=(label,data,list,value)=>`<div class="form-field"><label>${esc(label)}</label><select aria-label="${esc(label)}" ${data}${disabled}>${options([['','待确认'],...list],value||'')}</select></div>`;
+ const refOptions=refs.map(r=>[r.id,(r.name||r.mention||r.path||'待确认属性')+' · '+(r.path||'未匹配')]);
+ const issues=[...(c.unsupported||[]),...(c.blockingClarifications||[])],editBtn=(label,action,extra='')=>readOnly?'':btn(label,action,'sm','plus',extra);
+ return `<div class="inset-panel section-gap"><div class="between"><h3>通用规则卡</h3>${pill(readOnly?'人工确认':'自动预填 · 待人工确认','blue')}</div><h4 class="section-gap">解析意图</h4><p class="section-gap">${esc(c.intent||'可直接编辑下方规则卡，也可输入自然语言快捷填充。')}</p><div class="form-grid section-gap">${select('执行范围','data-field="scope"',Object.values(workflowScene(s).blocks).map(b=>[b.id,b.label+(b.many?' · 逐行':' · 主单')]),v.scope||c.scope)}${select('失败处理','data-card-setting="level"',[['阻断','拦截提交'],['警告','提醒但允许继续']],c.level||'阻断')}<div class="form-field wide"><label>失败提示</label><textarea aria-label="失败提示" data-card-setting="message"${disabled}>${esc(c.message||'')}</textarea><small>空值、超时、未知结果始终阻断；失败提示不替代判断标准。</small></div></div>
+ <div class="between section-gap"><h4>涉及的本体引用（可多个）与接口结果（分别核对）</h4>${editBtn('添加属性','workflow-rule-card-add-ref')}</div><div class="rule-card-references section-gap">${refs.map((r,i)=>{if(r.kind==='business-context'){const q=c.queries.find(q=>q.id===r.query);return `<article class="rule-reference-card" data-rule-key="${esc(r.id)}"><b>接口返回 · ${esc(q?.name||r.name||'待选择接口')}</b><p class="tiny muted section-gap">接口结果不属于本体属性；返回方式与业务判定在主配置区确认。</p><p class="tiny section-gap">${esc(q?.resultMode==='decision'?String(q.passValue??'待确认')+' → 通过；'+String(q.failValue??'待确认')+' → 不通过':r.output||'返回字段待确认')}</p></article>`;}const candidates=[...paths,...[r,...(r.candidates||[])].filter(p=>p.kind==='business-context'&&p.path)];return `<article class="rule-reference-card" data-rule-key="${esc(r.id)}"><div class="between"><b>${esc(r.mention||r.name||'属性 '+(i+1))}</b><div class="row">${pill(({condition:'适用条件',assertion:'校验要求',parameter:'查询入参'})[r.role]||'规则数据',r.path?'blue':'amber')}${readOnly?'':btn('移除','workflow-rule-card-remove','sm danger','',`data-kind="ref" data-index="${i}"`)}</div></div><p class="tiny muted section-gap">${esc(r.reason||'根据名称和当前配置匹配；需人工核对')}</p><div class="form-grid section-gap">${select('本体对象 / 属性',`data-card-ref="${i}" data-key="path"`,candidates.map(p=>[p.path,(p.objectName?p.objectName+' / ':'')+p.name+' · '+p.path]),r.path)}${r.kind==='business-context'&&(c.queries||[]).length?select('查询节点（接口返回）',`data-card-ref="${i}" data-key="query"`,c.queries.map(q=>[q.id,q.name||ability(q.capability)?.name||q.id]),r.query):''}</div>${r.kind==='business-form'||r.kind==='business-context'?'<p class="tiny muted section-gap">这是业务表单 / 接口返回字段，不冒充本体属性。</p>':''}${r.query?`${select('接口返回属性 / 路径',`data-card-ref="${i}" data-key="output"`,(ability(c.queries.find(q=>q.id===r.query)?.capability)?.maps||[]).map(m=>[m.target.startsWith('Context.')?m.target.slice(8):m.target.split('.').at(-1),m.source+' → '+m.target]),r.output)}${select('接口返回类型',`data-card-ref="${i}" data-key="type"`,['文本','数字','布尔','日期','集合'].map(t=>[t,t]),r.type)}`:''}</article>`;}).join('')||'<p class="tiny muted">尚未找到明确属性，请补充描述。</p>'}</div>
+ ${['conditions','assertions'].map(kind=>`<div class="between section-gap"><h4>${kind==='conditions'?'适用条件（全部满足才校验）':'校验要求（全部满足才通过）'}</h4>${editBtn('添加一项','workflow-rule-card-add-clause',`data-kind="${kind}"`)}</div>${(c[kind]||[]).map((a,i)=>c.references.find(r=>r.id===a.reference)?.kind==='business-context'?'':`<div class="rule-card-clause section-gap" data-rule-key="${workflowRuleAuthoringUIKey(a,kind)}">${select('比较属性',`data-card-clause="${kind}" data-index="${i}" data-key="reference"`,refOptions,a.reference)}${select('判断方式',`data-card-clause="${kind}" data-index="${i}" data-key="op"`,workflowRuleCardOperators,a.op)}${select('与另一属性比较（可选）',`data-card-clause="${kind}" data-index="${i}" data-key="valueReference"`,refOptions,a.valueReference)}<div class="form-field"><label>比较值 / 集合 / 范围</label><input aria-label="比较值 / 集合 / 范围" data-card-clause="${kind}" data-index="${i}" data-key="value" value="${esc(Array.isArray(a.value)?JSON.stringify(a.value):a.value??'')}" ${disabled}${['exists','notExists'].includes(a.op)||a.valueReference?' disabled':''}><small>集合或范围使用 JSON，例如 [0, 100]、["已发布", "已生效"]。</small></div>${readOnly?'':btn('移除本项','workflow-rule-card-remove','sm danger','',`data-kind="${kind}" data-index="${i}"`)}</div>`).join('')||`<p class="tiny muted section-gap">${kind==='conditions'?'无前置条件，始终适用。':'校验标准待补充，不能保存。'}</p>`}`).join('')}
+ ${editBtn('添加接口校验','workflow-rule-card-add-query')}${(c.queries||[]).length?`<h4 class="section-gap">接口校验节点（按需生成）</h4>${c.queries.map((q,i)=>`<article class="rule-reference-card section-gap" data-rule-key="${esc(q.id)}"><div class="form-grid">${select('推荐 / 指定的已登记接口',`data-card-query="${i}" data-key="capability"`,capabilities.filter(c=>connector(c.connector)?.enabled).map(c=>[c.id,c.name+' · '+c.id]),q.capability)}</div><p class="tiny muted section-gap">仅调用已登记查询；接口成功不代表校验通过，由返回字段及上方判断要求决定。</p>${(q.params||[]).map((p,j)=>`<div class="form-grid section-gap">${select('入参 '+p.name+' · 已映射属性',`data-card-param="${i}" data-index="${j}" data-key="reference"`,refs.filter(r=>r.kind==='ontology-property'&&paths.some(x=>x.path===r.path)).map(r=>[r.id,(r.name||r.path)+' · '+r.path]),p.reference)}</div>`).join('')}</article>`).join('')}`:''}
+ ${(c.clarifications||[]).length||issues.length?`<details class="plain-details section-gap" open><summary>解析待确认项</summary><ul class="deletion-list">${[...new Set([...(c.clarifications||[]),...issues].map(x=>typeof x==='string'?x:x.message))].map(x=>`<li>${esc(x)}</li>`).join('')}</ul><p class="tiny muted">本体属性未映射时，先到“对象与表单映射”建立对应关系；取值自动沿用映射，不另设来源。规则意图或判断标准不明确，需补充自然语言后重新解析。</p></details>`:''}</div>`;
+}
+function workflowRuleAuthoringStepsHTML(card){
+ const refs=(card?.references||[]).filter(r=>r.kind!=='business-context'),hasText=!!card?.text,issues=[...new Set([...(card?.clarifications||[]),...(card?.unsupported||[]),...(card?.blockingClarifications||[])].map(x=>typeof x==='string'?x:x.message))];
+ const clauses=kind=>(card?.[kind]||[]).map(a=>{const r=card.references.find(r=>r.id===a.reference),other=a.valueReference&&card.references.find(r=>r.id===a.valueReference);return (r?.name||r?.mention||'待匹配属性')+' '+(workflowRuleCardOperators.find(([id])=>id===a.op)?.[1]||a.op)+' '+(other?.name||(Array.isArray(a.value)?a.value.join('、'):a.value??''));});
+ return `<div class="rule-intent-panel inset-panel section-gap" data-rule-intent-steps><div class="between"><h3>2 · AI 用户意图解析</h3>${pill('本地解析模拟','blue')}</div><p class="tiny muted section-gap">意图解析步骤：展示可核对的意图摘要与匹配依据，不是真实模型的内部推理过程。</p>${hasText?`<p class="rule-intent-summary section-gap">${esc(card.intent||'校验意图待确认')}</p><div class="rule-intent-facts section-gap"><div><span>确定适用条件</span><p>${esc(clauses('conditions').join(' 且 ')||'始终适用')}</p></div><div><span>校验目标</span><p>${esc(clauses('assertions').join(' 且 ')||'判断标准待补充')}</p></div></div><div class="rule-section-label section-gap">从自然语言识别的本体 / 属性</div><div class="rule-intent-matches section-gap">${refs.map(r=>{const mapped=r.path&&r.kind==='ontology-property',o=mapped&&workflowRuleAuthoringObjects(scene()).find(o=>o.id===r.object);return `<div class="rule-intent-match ${r.path?'':'is-pending'}" data-rule-key="${esc(r.id)}"><div class="between"><span>“${esc(r.mention||r.name||'待匹配属性')}”</span>${pill(r.path?'已识别':'待确认',r.path?'blue':'amber')}</div><b>${esc(mapped?(o?.name||r.object)+' / '+r.name:r.kind==='business-context'?'接口返回 / '+r.name:r.mention||'尚未匹配本体属性')}</b><small>${esc(r.path||'未找到当前场景有效映射，请补充描述或手动选择')}</small><small>${esc(({condition:'适用条件',assertion:'被校验属性',parameter:'接口入参'})[r.role]||'规则引用')}</small></div>`;}).join('')||'<p class="tiny muted">尚无明确属性，请补充对象名称和属性名称。</p>'}</div>${card.references.some(r=>r.kind==='business-context')?`<div class="rule-section-label section-gap">接口返回结果 · 非本体属性</div><p class="tiny section-gap">${esc(card.references.filter(r=>r.kind==='business-context').map(r=>r.name||'接口校验结果').join('；'))}</p>`:''}${issues.length?`<div class="rule-intent-issues section-gap" role="status"><b>待确认项</b><ul>${issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}`:'<p class="rule-empty-note section-gap">输入业务描述后，自动展示用户意图、识别的本体对象 / 属性，以及需要确认的信息。也可直接配置下方规则卡。</p>'}</div>`;
+}
+function workflowRuleAuthoringExampleHTML(){return `<details class="plain-details inset-panel section-gap"><summary>查看业务数据示例：后端最小系统未发布则拦截</summary><p class="section-gap">示例描述：当申请人为后端业务部人员时，检查单据整机物料的最小系统是否发布，未发布拦截提交。</p><ol class="deletion-list"><li>人员条件：申请人所属部门等于后端业务部。</li><li>本体匹配：人员 · 所属部门；整机物料 · 物料代码。需在当前流程单先建立映射。</li><li>接口入参：由已映射的单据物料代码调用已登记校验接口。</li><li>返回判断：核对返回字段、类型，以及哪些值表示已发布 / 未发布；调用成功不等于已发布。</li><li>失败处理：未发布拦截提交；超时、空值和未知返回阻断并提示重试。</li></ol><p class="tiny muted">这只是通用规则卡的数据示例，不绑定发布单，不自动修改当前规则卡。</p>${btn('用此描述填充规则卡','workflow-rule-business-example','sm','refresh')}</details>`;}
 function workflowRuleAuthoringDrawer(){
-  const d=state.drawer,s=appScenes[d.authoringSceneId];if(!s)return frame('场景已不存在','','');
-  return workflowRuleAuthoringContext(s,()=>{
-    const v=d.draft,objectsAvailable=workflowRuleAuthoringObjects(s),blocks=workflowRuleAuthoringBlocks(s,v.objectId),r=d.generated;
-    const fresh=!!r&&d.generatedFingerprint===workflowRuleAuthoringFingerprint(s,v)&&scene()?.id===s.id;
-    const objectLabels=objectsAvailable.map(o=>[o.id,`${o.name} · ${o.id} · ${s.ontologyVersions?.[o.id]||'未锁定发布版本'}`]);
-    const matches=r?r.naturalLanguage.properties:ruleFacts(s,{scope:v.scope}).map(f=>({fact:f.id,name:f.name,path:f.capability?`${f.capability} · ${f.output||f.id}`:f.source,kind:f.capability?'候选查询字段':'候选表单字段'}));
-    let html=frame('自然语言生成规则',`${esc(s.name)} · 先生成预览，再人工确认；此步骤不保存配置。`,`${inf('本地受控解析（不是真实 AI）：仅识别明确模板，不猜测模糊要求，不执行或自动启用规则。')}<div class="form-grid section-gap">${field('自然语言描述 *','originalText',v.originalText,'textarea',[],'示例：安全 DI = 0；商品目录图片、资料、规格和功能必须存在且非空；后端业务部提交时，最小系统必须已发布。每次只配置一条规则。',true)}${field('适用本体对象 *','objectId',v.objectId,'select',[['','请选择适用对象'],...objectLabels])}${field('执行区块 / 范围 *','scope',v.scope,'select',[['','请选择确切区块'],...blocks.map(b=>[b.id,`${b.label} · ${b.many?'逐行独立判断':'单条记录'} · ${b.id}`])])}</div><div class="between section-gap"><h3>匹配本体</h3>${pill(r?'已核对引用':'候选属性预览','blue')}</div><div class="table-wrap section-gap"><table class="config-table"><thead><tr><th>本体属性 / 本次业务字段</th><th>引用路径与来源</th><th>匹配范围</th></tr></thead><tbody>${matches.map(p=>`<tr><td class="field-name">${esc(p.name)}<code class="field-path">${esc(p.fact)}</code></td><td><code>${esc(p.path)}</code><small class="field-path">${esc(p.kind==='ontology-property'?`本体属性 · ${p.version}`:p.kind==='business-context'?'本次业务查询字段（非全局本体属性）':p.kind==='business-form'?'当前表单字段（非本体属性）':p.kind)}</small></td><td>${esc(workflowScene(s).blocks[v.scope]?.label||'待选择')}${p.capability?`<small class="field-path">${esc(p.capability)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="3" class="empty">选择本体对象与执行区块后预览可用属性。</td></tr>'}</tbody></table></div>${d.clarifications.length?`<div class="inset-panel section-gap"><h3>需澄清项 · 不可保存</h3><ul class="deletion-list">${d.clarifications.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}<div data-rule-authoring-preview class="inset-panel section-gap"><div class="between"><h3>结构化条件与断言</h3>${pill(!r?'待生成':fresh?'待人工确认':'已过期，需重新生成','amber')}</div>${r?`<dl class="kv section-gap"><dt>自然描述</dt><dd>${esc(r.naturalLanguage.originalText)}</dd><dt>匹配本体</dt><dd>${r.naturalLanguage.objects.map(o=>`${esc(o.name)} · ${esc(o.version)}`).join('、')}</dd><dt>执行范围</dt><dd>${esc(workflowScene(s).blocks[r.scope].label)} · 每条记录独立判断</dd><dt>当</dt><dd>${r.conditions.map(a=>esc(ruleText(s,r,a))).join(' 且 ')||'始终适用'}</dd><dt>必须满足</dt><dd>${r.assertions.map(a=>esc(ruleText(s,r,a))).join('；')}</dd><dt>查询参数</dt><dd>${Object.entries(r.params).map(([k,v])=>`${esc(k)} ← ${esc(v)}`).join('<br>')}</dd><dt>失败提示</dt><dd>${esc(r.message)}</dd><dt>待确认状态</dt><dd>未保存 · 默认停用 · 提交前终检 · 阻断</dd></dl>`:'<p class="tiny muted section-gap">尚无生成草稿。修改原文、对象或范围后须重新生成。</p>'}</div>`,btn(r?'重新生成草稿':'生成结构化草稿','workflow-rule-generate','','refresh')+btn('人工确认并编辑','workflow-rule-confirm','primary','check',fresh&&!d.clarifications.length?'':'disabled'),true);
-    if(typeof sceneReleaseGuardHTML==='function')html=sceneReleaseGuardHTML(html);return html;
-  });
+ const d=state.drawer,s=appScenes[d.authoringSceneId];if(!s)return frame('场景已不存在','','');
+ return workflowRuleAuthoringContext(s,()=>{const fresh=!!d.generated&&d.generatedFingerprint===workflowRuleAuthoringFingerprint(s,d.draft);return frame('自然语言配置规则',s.name+' · 输入描述 → 意图与本体识别 → 校验配置 → 人工确认',`${inf('先描述业务要求，再确认识别的本体对象 / 属性和校验方式。仅使用当前场景有效映射，取值自动带入；生成与保存不执行校验，默认停用。')}<div class="rule-input-panel section-gap"><h3>1 · 自然语言输入</h3><div class="form-grid section-gap">${field('业务规则描述（选填，也可直接配置）','originalText',d.draft.originalText,'textarea',[],'描述什么情况下检查、被校验的对象 / 属性、要达到的状态，以及未通过如何处理。修改描述将重新解析并替换下方配置。',true)}</div></div><div class="row section-gap">${workflowRuleAuthoringExamples(s).map(({id,label})=>btn(label,'workflow-rule-chain-example','sm','',`data-example="${id}"`)).join('')}</div>${workflowRuleAuthoringExampleHTML()}<div data-rule-intent-preview>${workflowRuleAuthoringStepsHTML(d.draft.card)}${workflowRuleAuthoringCardHTML(s,d.draft)}</div><div data-rule-authoring-preview class="section-gap">${d.generated?`${inf(fresh?'结构化草稿已生成，尚未保存。请核对后人工确认。':'草稿已过期，需重新生成。',fresh?'green':'amber')}<details class="plain-details section-gap"><summary>查看结构化规则（供核对）</summary>${jsonView(d.generated.ruleCard)}</details>`:'<p class="tiny muted">自动预填不代表规则已确认；补齐卡片后生成可保存的结构化草稿。</p>'}</div>`,btn('生成结构化草稿','workflow-rule-generate','','refresh')+btn('人工确认并编辑','workflow-rule-confirm','primary','check',fresh?'':'disabled'),true);});
 }
-Object.assign(extraDrawers,{workflowRuleAuthoring:workflowRuleAuthoringDrawer});
+function workflowRuleAuthoringProvenanceHTML(meta){return meta?`<div class="inset-panel section-gap"><h3>自然语言来源</h3><p class="section-gap">${esc(meta.originalText)}</p><p class="tiny muted section-gap">本地解析 · 原文仅作来源记录；人工调整后以确认的结构化规则为准。</p></div>`:'';}
+const workflowRuleAuthoringTextBefore=ruleText;
+ruleText=function(s,r,a){if(!r.ruleCard)return workflowRuleAuthoringTextBefore(s,r,a);const ref=r.ruleCard.references.find(x=>x.id===a.fact||x.id===a.reference),right=a.valueReference&&r.ruleCard.references.find(x=>x.id===a.valueReference);return `${ref?.name||a.fact} ${workflowRuleCardOperators.find(([id])=>id===a.op)?.[1]||a.op}${['exists','notExists'].includes(a.op)?'':' '+(right?.name|| (Array.isArray(a.value)?a.value.join('、'):typeof a.value==='boolean'?(a.value?'是':'否'):a.value))}`;};
+const workflowRuleAuthoringViewBefore=workflowRulesView;
+workflowRulesView=function(s){let html=workflowRuleAuthoringViewBefore(s);if(workflowScene(s).type!=='draft')return html;html=html.replace('<h3>校验规则</h3>','<h3>规则配置</h3>').replace(btn('添加规则','workflow-add-rule','sm','plus'),btn('配置规则（支持自然语言）','workflow-rule-authoring','sm primary','plus')).replace('尚无规则，点击“添加规则”配置。','尚无规则，请配置通用规则卡；可用自然语言快捷填充，人工确认后保存。');return typeof sceneReleaseGuardHTML==='function'?sceneReleaseGuardHTML(html):html;};
 const workflowRuleAuthoringEditorBefore=extraDrawers.workflowRule;
-extraDrawers.workflowRule=function(){
-  const d=state.drawer;if(!d.draft.naturalLanguage||workflowScene(scene()).type!=='draft')return workflowRuleAuthoringEditorBefore();
-  return workflowRuleAuthoringContext(scene(),()=>workflowRuleAuthoringEditorBefore().replace('<div class="drawer-body">','<div class="drawer-body">'+workflowRuleAuthoringProvenanceHTML(d.draft.naturalLanguage)));
-};
-Object.assign(actionsMap,{'workflow-rule-authoring':workflowRuleAuthoringOpen,'workflow-rule-generate':workflowRuleAuthoringGenerate,'workflow-rule-confirm':workflowRuleAuthoringConfirm});
-// 注册发生在 scene-release / object-release 之前，后续模块会自动包装这些动作。
-// 也兼容模块被延后载入；自身仍检查编辑权限、所有权与精确场景指纹。
-if(typeof sceneReleaseMutations!=='undefined'){
-  for(const action of workflowRuleAuthoringActions){
-    sceneReleaseMutations.add(action);const before=actionsMap[action];
-    actionsMap[action]=function(el){if(!sceneReleaseGuard(action,el))return;return workflowRuleAuthoringContext(scene(),()=>before(el));};
-  }
+extraDrawers.workflowRule=function(){const d=state.drawer;if(!d.draft.ruleCard||workflowScene(scene()).type!=='draft')return workflowRuleAuthoringEditorBefore();return workflowRuleAuthoringContext(scene(),()=>frame(d.isNew?'人工确认生成规则':'修改已生成规则','核对涉及对象、属性、接口入参与返回判定；保存不执行。',`${workflowRuleAuthoringProvenanceHTML(d.draft.naturalLanguage)}${workflowRuleAuthoringCardHTML(scene(),{card:d.draft.ruleCard,scope:d.draft.scope},true)}<div class="form-grid section-gap">${field('规则名称 *','name',d.draft.name,'text',[],null,true)}${field('失败提示 *','message',d.draft.message,'textarea',[],null,true)}${field('是否启用','active',d.draft.enabled?'启用':'停用','select',['启用','停用'])}</div><div class="row section-gap">${btn('返回自然语言修改并重新生成','workflow-rule-authoring-return','sm','refresh')}</div>`,btn('确认并保存规则','workflow-save-rule','primary','check'),true));};
+const workflowRuleAuthoringAddBefore=actionsMap['workflow-add-rule'];
+actionsMap['workflow-add-rule']=el=>workflowScene(scene()).type==='draft'?workflowRuleAuthoringOpen():workflowRuleAuthoringAddBefore(el);
+Object.assign(extraDrawers,{workflowRuleAuthoring:workflowRuleAuthoringDrawer});
+Object.assign(actionsMap,{'workflow-rule-authoring':workflowRuleAuthoringOpen,'workflow-rule-chain-example':workflowRuleAuthoringLoadExample,'workflow-rule-generate':workflowRuleAuthoringGenerate,'workflow-rule-confirm':workflowRuleAuthoringConfirm,'workflow-rule-authoring-return':()=>{const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRule'))return;const input=structuredClone(d.authoringInput||d.draft.naturalLanguage?.authoringInput||{originalText:d.draft.naturalLanguage?.originalText||'',scope:d.draft.scope,card:d.draft.ruleCard});openDrawer('workflowRuleAuthoring',input,{authoringSceneId:scene().id,releaseOwnerScene:scene().id,generated:null,generatedFingerprint:null,clarifications:[]});}});
+function workflowRuleAuthoringNewReference(c,role,extra={}){let n=1;while(c.references.some(r=>r.id==='ref-'+n))n++;const r={id:'ref-'+n,path:'',object:'',property:'',name:'',type:'',kind:'ontology-property',role,mention:'待选择属性',candidates:[],...extra};c.references.push(r);return r;}
+function workflowRuleAuthoringPrune(c){const used=new Set([...c.conditions,...c.assertions].flatMap(a=>[a.reference,a.valueReference]).filter(Boolean));for(const q of c.queries)for(const p of q.params)if(p.reference)used.add(p.reference);c.references=c.references.filter(r=>used.has(r.id));}
+function workflowRuleAuthoringSyncScope(s,v){const c=v.card,paths=workflowRuleAuthoringPaths(s),rowBlocks=[...new Set(c.references.filter(r=>r.kind==='ontology-property'&&r.path).flatMap(r=>paths.find(p=>p.path===r.path)?.sources.filter(src=>src.source.startsWith('row.')).map(src=>src.block)||[]))],main=Object.values(workflowScene(s).blocks).find(b=>!b.parent);if(!v.scopeManual){v.scope=rowBlocks.length===1?rowBlocks[0]:rowBlocks.length===0?main?.id||'':'';c.scope=v.scope;}for(const r of c.references.filter(r=>r.kind==='ontology-property'&&r.path))r.source=sceneRuleCardMappedSource(s,v.scope,r.path).source||'';}
+function workflowRuleAuthoringSetResultMode(c,q,mode){
+ if(!['decision','data'].includes(mode))return;const cap=ability(q.capability);if(cap?.validationResult&&mode!=='decision')return;q.resultMode=mode;delete q.passValue;delete q.failValue;
+ const refs=c.references.filter(r=>r.query===q.id),contract=cap?.validationResult;
+ if(mode==='decision'){if(contract){q.output='validationDecision';q.type=contract.type;q.passValue=contract.passValue;q.failValue=contract.failValue;for(const r of refs)Object.assign(r,{path:'Context.validationDecision',kind:'business-context',object:'',property:'validationDecision',output:'validationDecision',name:'接口校验结果',mention:'接口校验结果',type:contract.type});}
+ else if(sceneRuleCardType(q.type)==='布尔'){q.passValue=true;q.failValue=false;}
+ }
+ for(const a of c.assertions.filter(a=>refs.some(r=>r.id===a.reference))){a.op='eq';a.value=mode==='decision'?q.passValue??'':'';delete a.valueReference;delete a.flags;}
 }
+function workflowRuleAuthoringSetQuery(s,v,i,value){
+ const c=v.card,q=c.queries[i];if(!q)return;const previous=q.capability,cap=ability(value);q.capability=cap?.id||'';q.endpointInput='';q.name=cap?.name||'';q.params=(cap?.params||[]).map(sceneRuleCardParam).map(def=>({name:def.name,reference:''}));q.output='';q.type='';q.resultMode=cap?.validationResult?'decision':'data';delete q.passValue;delete q.failValue;
+ for(const r of c.references.filter(r=>r.query===q.id)){r.output='';r.path='';r.object='';r.property='';r.type='';delete r.source;for(const a of [...c.conditions,...c.assertions].filter(a=>a.reference===r.id)){a.value='';delete a.valueReference;if(['matches','notMatches'].includes(a.op))a.op='eq';}}
+ if(cap?.object==='Context'){
+ const maps=cap.maps.filter(m=>m.target.startsWith('Context.'));if(!previous&&maps.length===1){const map=maps[0];q.output=map.target.slice(8);q.type=map.sourceType||'';for(const r of c.references.filter(r=>r.query===q.id))Object.assign(r,{path:map.target,output:q.output,type:q.type,name:map.description||map.target,property:q.output});}
+ for(const p of q.params){const def=cap.params.map(sceneRuleCardParam).find(x=>x.name===p.name),matches=workflowRuleAuthoringPaths(s).filter(x=>def.target?x.path===def.target:x.property===p.name);if(matches.length===1){let ref=c.references.find(r=>r.kind==='ontology-property'&&r.path===matches[0].path);if(!ref)ref=workflowRuleAuthoringNewReference(c,'parameter',matches[0]);p.reference=ref.id;}}
+ }if(cap?.validationResult)workflowRuleAuthoringSetResultMode(c,q,'decision');workflowRuleAuthoringPrune(c);workflowRuleAuthoringSyncScope(s,v);
+}
+function workflowRuleAuthoringSetMode(v,mode){
+ if(!['local','interface'].includes(mode))return;const c=v.card;if(workflowRuleAuthoringMode(c)===mode){c.validationMethod=mode;return;}c.validationMethod=mode;
+ if(mode==='interface'){c.assertions=[];c.queries=[];workflowRuleAuthoringPrune(c);let n=1;while(c.queries.some(q=>q.id==='query-'+n))n++;const q={id:'query-'+n,capability:'',name:'接口校验',params:[],output:'',type:''};c.queries.push(q);const r=workflowRuleAuthoringNewReference(c,'assertion',{kind:'business-context',name:'接口返回',mention:'接口返回',query:q.id,output:''});c.assertions.push({reference:r.id,op:'eq',value:''});}
+ else{c.assertions=c.assertions.filter(a=>!c.references.find(r=>r.id===a.reference)?.query);c.queries=[];for(const a of c.assertions){a.op='matches';a.value='';delete a.valueReference;delete a.flags;}if(!c.assertions.length){const r=workflowRuleAuthoringNewReference(c,'assertion');c.assertions.push({reference:r.id,op:'matches',value:''});}workflowRuleAuthoringPrune(c);}
+ workflowRuleAuthoringSyncScope(scene(),v);
+}
+function workflowRuleAuthoringCardMutation(el,kind){
+ const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;const c=d.draft.card??=workflowRuleAuthoringEmptyCard(d.draft.originalText),id=prefix=>{let n=1;while(c.references.some(r=>r.id===prefix+n)||c.queries.some(q=>q.id===prefix+n))n++;return prefix+n;};
+ if(kind==='ref')c.references.push({id:id('ref-'),path:'',object:'',property:'',name:'',type:'',kind:'ontology-property',role:'assertion',mention:'新增属性',candidates:[]});
+ else if(kind==='clause'&&['conditions','assertions'].includes(el?.dataset?.kind)){const ref={id:id('ref-'),path:'',object:'',property:'',name:'',type:'',kind:'ontology-property',role:el.dataset.kind==='conditions'?'condition':'assertion',mention:'待选择属性',candidates:[]};c.references.push(ref);c[el.dataset.kind].push({reference:ref.id,op:el.dataset.kind==='assertions'&&workflowRuleAuthoringMode(c)==='local'?'matches':'eq',value:''});}
+ else if(kind==='query'){const q={id:id('query-'),capability:'',name:'接口校验',params:[],output:'',type:''};c.queries.push(q);const ref={id:id('ref-'),path:'',object:'',property:'',name:'接口返回',type:'',kind:'business-context',role:'assertion',mention:'接口返回',query:q.id,output:'',candidates:[]};c.references.push(ref);c.assertions.push({reference:ref.id,op:'eq',value:''});}
+ workflowRuleAuthoringInvalidate(d);workflowRuleAuthoringRefresh(el);
+}
+Object.assign(actionsMap,{'workflow-rule-card-remove-query':el=>{const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;const c=d.draft.card,index=Number(el?.dataset?.index),q=c.queries[index];if(!q)return;const ids=new Set(c.references.filter(r=>r.query===q.id).map(r=>r.id));c.conditions=c.conditions.filter(a=>!ids.has(a.reference)&&!ids.has(a.valueReference));c.assertions=c.assertions.filter(a=>!ids.has(a.reference)&&!ids.has(a.valueReference));c.queries.splice(index,1);workflowRuleAuthoringPrune(c);workflowRuleAuthoringSyncScope(scene(),d.draft);workflowRuleAuthoringInvalidate(d);workflowRuleAuthoringRefresh(el);},'workflow-rule-card-add-ref':el=>workflowRuleAuthoringCardMutation(el,'ref'),'workflow-rule-card-add-clause':el=>workflowRuleAuthoringCardMutation(el,'clause'),'workflow-rule-card-add-query':el=>workflowRuleAuthoringCardMutation(el,'query'),'workflow-rule-card-remove':el=>{const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;const c=d.draft.card,kind=el?.dataset?.kind,index=Number(el?.dataset?.index);if(!Number.isInteger(index)||index<0)return;if(kind==='ref'){const ref=c.references[index];if(!ref)return;if([...c.conditions,...c.assertions].some(a=>a.reference===ref.id||a.valueReference===ref.id)||c.queries.some(q=>q.params.some(p=>p.reference===ref.id)))return errorDrawer('该属性仍被条件、校验或接口入参使用，请先移除对应项。');c.references.splice(index,1);}else if(['conditions','assertions'].includes(kind)&&index<c[kind].length){const a=c[kind].splice(index,1)[0],ref=c.references.find(r=>r.id===a.reference);if(ref&&!ref.query&&![...c.conditions,...c.assertions].some(x=>x.reference===ref.id||x.valueReference===ref.id)&&!c.queries.some(q=>q.params.some(p=>p.reference===ref.id)))c.references=c.references.filter(r=>r.id!==ref.id);}else return;workflowRuleAuthoringInvalidate(d);workflowRuleAuthoringRefresh(el);},'workflow-rule-business-example':el=>{const d=state.drawer;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;d.draft.originalText=workflowRuleAuthoringExample;d.draft.card=workflowRuleAuthoringAnalyze(scene(),d.draft.originalText);d.draft.scope=d.draft.card.scope||'';workflowRuleAuthoringInvalidate(d);workflowRuleAuthoringRefresh(el);}});
 const workflowRuleAuthoringSaveBefore=actionsMap['workflow-save-rule'];
 actionsMap['workflow-save-rule']=function(el){
-  const d=state.drawer;if(d?.type!=='workflowRule'||!d.draft.naturalLanguage)return workflowRuleAuthoringSaveBefore(el);
-  // 历史来源规则在非智能提单类型下沿用原编辑 / 保存行为。
-  if(workflowScene(scene()).type!=='draft'){
-    if(d.authoringFingerprint)return errorDrawer('应用类型已变化，请重新生成规则。');
-    return workflowRuleAuthoringSaveBefore(el);
-  }
-  if(!sceneReleaseCanEdit(scene())||d.releaseOwnerScene!==scene()?.id)return errorDrawer('场景已切换或不在编辑中，请重新打开规则。');
-  if(d.isNew&&(!d.authoringFingerprint||d.authoringFingerprint!==workflowRuleAuthoringFingerprint(scene(),d.authoringInput||{})))return errorDrawer('场景、来源或本体快照已变化，请重新生成并人工确认。');
-  const saved=workflowScene(scene()).rules.find(r=>r.id===d.draft.id),meta=d.authoringProvenance||saved?.naturalLanguage;
-  if(!meta)return errorDrawer('自然语言草稿缺少可核对的来源记录，请重新生成。');
-  const error=workflowRuleAuthoringContext(scene(),()=>validateWorkflowRule(scene(),d.draft));if(error)return errorDrawer(error);
-  d.draft.naturalLanguage={...structuredClone(meta),reviewStatus:'saved-after-human-review',correspondence:meta.correspondence==='structured-edited'||workflowRuleAuthoringStructure(d.draft)!==meta.generatedStructure?'structured-edited':'human-reviewed-template'};
-  return workflowRuleAuthoringSaveBefore(el);
+ const d=state.drawer;if(d?.type!=='workflowRule'||!d.draft.ruleCard)return workflowRuleAuthoringSaveBefore(el);
+ if(!workflowRuleAuthoringAllowed(d,'workflowRule'))return;
+ if(d.isNew&&(!d.authoringFingerprint||d.authoringFingerprint!==workflowRuleAuthoringFingerprint(scene(),d.authoringInput||{})))return errorDrawer('场景、接口或本体版本已变化，请重新生成并确认。');
+ const issue=workflowRuleAuthoringContext(scene(),()=>sceneRuleCardValidate(scene(),d.draft));if(issue)return errorDrawer(issue);
+ const meta=d.authoringProvenance||workflowScene(scene()).rules.find(r=>r.id===d.draft.id)?.naturalLanguage;if(!meta)return errorDrawer('缺少自然语言来源，请重新生成。');
+ d.draft.naturalLanguage={...structuredClone(meta),reviewStatus:'saved-after-human-review',correspondence:workflowRuleAuthoringStructure(d.draft)!==meta.generatedStructure?'structured-edited':'human-reviewed-template'};return workflowRuleAuthoringSaveBefore(el);
 };
 function workflowRuleAuthoringChanged(e){
-  const d=state.drawer,el=e.target;if(d?.type!=='workflowRuleAuthoring'||!['originalText','objectId','scope'].includes(el.dataset.field))return;
-  d.draft[el.dataset.field]=el.value;
-  if(el.dataset.field==='objectId')d.draft.scope='';
-  d.generated=null;d.generatedFingerprint=null;d.clarifications=[];d.error='';d.dirty=true;
-  if(e.type==='change'||el.dataset.field!=='originalText')drawOverlay();
-  else{
-    // 不重绘输入框，保留光标；立即移除旧预览并关闭确认入口。
-    const body=overlayRoot.querySelector('[data-rule-authoring-preview]');if(body)body.innerHTML='<h3>结构化条件与断言</h3><p class="tiny muted section-gap">原文已修改，需重新生成；尚未保存。</p>';
-    const confirm=overlayRoot.querySelector('[data-action="workflow-rule-confirm"]');if(confirm){confirm.disabled=true;confirm.setAttribute('aria-disabled','true');}
-  }
+ const d=state.drawer,el=e.target;if(d?.type!=='workflowRuleAuthoring')return;if(e.type==='input'&&el.tagName==='SELECT')return;if(!workflowRuleAuthoringAllowed(d,'workflowRuleAuthoring'))return;
+ if(el.dataset.field==='originalText'){d.draft.originalText=el.value;d.draft.card=String(el.value).trim()?workflowRuleAuthoringAnalyze(scene(),el.value):workflowRuleAuthoringEmptyCard();d.draft.scopeManual=false;d.draft.scope=d.draft.card.scope||'';}
+ else if(el.dataset.cardValidationMode!==undefined){workflowRuleAuthoringSetMode(d.draft,el.value);}
+ else if(el.dataset.cardResultMode!==undefined){const q=d.draft.card?.queries[Number(el.dataset.cardResultMode)];if(!q)return;workflowRuleAuthoringSetResultMode(d.draft.card,q,el.value);}
+ else if(el.dataset.cardDecision!==undefined){const c=d.draft.card,q=c?.queries[Number(el.dataset.cardDecision)],key=el.dataset.key;if(!q||q.resultMode!=='decision'||!['passValue','failValue'].includes(key))return;const raw=el.value,type=sceneRuleCardType(q.type);q[key]=raw===''?undefined:type==='布尔'?raw==='true'?true:raw==='false'?false:raw:type==='数字'&&/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)?Number(raw):raw;for(const a of c.assertions.filter(a=>c.references.find(r=>r.id===a.reference)?.query===q.id)){a.op='eq';a.value=q.passValue??'';delete a.valueReference;}}
+ else if(el.dataset.cardEndpoint!==undefined){const i=Number(el.dataset.cardEndpoint),q=d.draft.card?.queries[i];if(!q)return;const value=el.value.trim(),matches=capabilities.filter(c=>c.object==='Context'&&c.enabled!==false&&connector(c.connector)?.enabled&&[c.id,c.name,workflowRuleAuthoringEndpoint(c)].includes(value));if(matches.length===1){if(q.capability!==matches[0].id)workflowRuleAuthoringSetQuery(scene(),d.draft,i,matches[0].id);else q.endpointInput='';}else{workflowRuleAuthoringSetQuery(scene(),d.draft,i,'');d.draft.card.queries[i].endpointInput=value;}}
+ else if(el.dataset.cardParamPath!==undefined){const p=d.draft.card?.queries[Number(el.dataset.cardParamPath)]?.params[Number(el.dataset.index)],mapped=workflowRuleAuthoringPaths(scene()).find(x=>x.path===el.value);if(!p)return;if(!mapped)return workflowRuleAuthoringInlineError('接口入参请选择当前场景已映射的本体对象 / 属性。',el);let ref=d.draft.card.references.find(r=>r.kind==='ontology-property'&&r.path===mapped.path);if(!ref)ref=workflowRuleAuthoringNewReference(d.draft.card,'parameter',mapped);p.reference=ref.id;delete p.source;workflowRuleAuthoringPrune(d.draft.card);workflowRuleAuthoringSyncScope(scene(),d.draft);}
+ else if(el.dataset.field==='scope'){d.draft.scopeManual=true;d.draft.scope=el.value;if(d.draft.card){d.draft.card.scope=el.value;for(const r of d.draft.card.references.filter(r=>r.kind==='ontology-property'&&r.path)){const resolved=sceneRuleCardMappedSource(scene(),el.value,r.path);r.source=resolved.source||'';}}}
+ else if(el.dataset.cardRef!==undefined){const r=d.draft.card?.references[Number(el.dataset.cardRef)],key=el.dataset.key;if(!r||!['object','path','query','output','type'].includes(key))return;const query=r.query&&d.draft.card.queries.find(q=>q.id===r.query);if(r.kind==='business-context'&&(['object','path','query'].includes(key)||ability(query?.capability)?.validationResult))return workflowRuleAuthoringInlineError('接口出参按返回契约判定，不选择或映射本体属性。',el);if(key==='path'&&r.kind==='ontology-property'&&!workflowRuleAuthoringPaths(scene()).some(p=>p.path===el.value))return workflowRuleAuthoringInlineError('该属性未参与当前场景映射，请先建立表单对应关系。',el);r[key]=el.value;
+ if(key==='type'&&r.kind!=='business-context')return;if(key==='type'&&r.query){const q=d.draft.card.queries.find(q=>q.id===r.query);if(q){q.type=el.value;if(q.resultMode==='decision')workflowRuleAuthoringSetResultMode(d.draft.card,q,'decision');}}
+ if(key==='object'){r.path='';r.source='';r.query='';r.output='';}
+ if(key==='path'){const p=[...workflowRuleAuthoringPaths(scene()),...(r.candidates||[])].find(p=>p.path===el.value);if(p){Object.assign(r,{object:p.object,property:p.property||p.path.split('.').at(-1),name:p.name,type:p.type,kind:p.kind||'ontology-property'});r.source=p.source||'';r.query=p.query||'';r.output=p.output||'';if(!r.source&&!r.query){const b=Object.values(workflowScene(scene()).blocks).filter(b=>!b.parent||b.id===d.draft.scope),matches=b.flatMap(b=>(scene().bindings[b.id]||[]).filter(m=>m.ontology===r.path).map(m=>({source:(b.parent?'row.':'order.')+m.target.split('.').at(-1)})));if(matches.length===1)r.source=matches[0].source;}}}
+ if(key==='query'&&el.value)r.source='';
+ if(key==='output'&&r.query){const q=d.draft.card.queries.find(q=>q.id===r.query),map=ability(q?.capability)?.maps.find(m=>m.target==='Context.'+el.value||m.target===r.object+'.'+el.value);if(map){r.output=el.value;if(q){q.output=el.value;q.type=map.sourceType||r.type;}if(map.target.startsWith('Context.')){r.path=map.target;r.kind='business-context';r.object='';r.property=el.value;r.type=map.sourceType||r.type;r.name=map.description||map.target;}else{const prop=workflowRuleAuthoringPaths(scene()).find(p=>p.path===map.target);if(prop)Object.assign(r,prop);}if(q?.resultMode==='decision')workflowRuleAuthoringSetResultMode(d.draft.card,q,'decision');}}
+
+ }
+ else if(el.dataset.cardChoice){const kind=el.dataset.cardChoice,a=d.draft.card?.[kind]?.[Number(el.dataset.index)];if(!a||!['conditions','assertions'].includes(kind))return;if(kind==='assertions'&&d.draft.card.references.find(r=>r.id===a.reference)?.query)return workflowRuleAuthoringInlineError('接口返回判定不选择本体属性，请配置接口返回方式。',el);const mapped=workflowRuleAuthoringPaths(scene()).find(p=>p.path===el.value),context=d.draft.card.references.find(r=>r.kind==='business-context'&&r.path===el.value);if(!mapped&&!context)return workflowRuleAuthoringInlineError('请从当前流程单已映射属性或已登记接口结果中选择。',el);
+ const previous=d.draft.card.references.find(r=>r.id===a.reference);if(context)a.reference=context.id;else{const shared=previous&&[...d.draft.card.conditions,...d.draft.card.assertions].some(x=>x!==a&&(x.reference===previous.id||x.valueReference===previous.id))||previous&&d.draft.card.queries.some(q=>q.params.some(p=>p.reference===previous.id));const ref=previous?.kind==='ontology-property'&&!shared?previous:{id:'ref-auto-'+Date.now()+'-'+d.draft.card.references.length,kind:'ontology-property',role:kind==='conditions'?'condition':'assertion'};if(ref!==previous)d.draft.card.references.push(ref);Object.assign(ref,mapped);ref.mention=mapped.name;delete ref.query;delete ref.output;const resolved=sceneRuleCardMappedSource(scene(),d.draft.scope||d.draft.card.scope,ref.path);ref.source=resolved.source||'';a.reference=ref.id;}
+ const rowBlocks=[...new Set(d.draft.card.references.filter(r=>r.kind==='ontology-property'&&r.path).flatMap(r=>workflowRuleAuthoringPaths(scene()).find(p=>p.path===r.path)?.sources.filter(src=>src.source.startsWith('row.')).map(src=>src.block)||[]))],main=Object.values(workflowScene(scene()).blocks).find(b=>!b.parent);if(!d.draft.scopeManual){d.draft.scope=rowBlocks.length===1?rowBlocks[0]:rowBlocks.length===0?main?.id||'':'';d.draft.card.scope=d.draft.scope;}for(const ref of d.draft.card.references.filter(r=>r.kind==='ontology-property'&&r.path)){const resolved=sceneRuleCardMappedSource(scene(),d.draft.scope,ref.path);ref.source=resolved.source||'';}delete a.valueReference;a.value='';}
+ else if(el.dataset.cardSetting&&['level','message'].includes(el.dataset.cardSetting)){d.draft.card[el.dataset.cardSetting]=el.value;}
+ else if(el.dataset.cardClause){const a=d.draft.card?.[el.dataset.cardClause]?.[Number(el.dataset.index)];if(!a)return;const q=d.draft.card.queries.find(q=>q.id===d.draft.card.references.find(r=>r.id===a.reference)?.query);if(q?.resultMode==='decision')return workflowRuleAuthoringInlineError('直接校验结果请配置通过值 / 不通过值，不使用属性比较。',el);let value=el.value;if(el.dataset.key==='value'&&!['matches','notMatches'].includes(a.op)&&/^[\[]/.test(value)){try{value=JSON.parse(value);}catch{}}else if(el.dataset.key==='value'&&['in','notIn','between'].includes(a.op))value=value.split(/[,，]/).map(x=>x.trim()).filter(Boolean);if(el.dataset.key==='op'&&['exists','notExists'].includes(value))delete a.valueReference;a[el.dataset.key]=value;}
+ else if(el.dataset.cardQuery!==undefined){workflowRuleAuthoringSetQuery(scene(),d.draft,Number(el.dataset.cardQuery),el.value);}
+ else if(el.dataset.cardParam!==undefined){const p=d.draft.card?.queries[Number(el.dataset.cardParam)]?.params[Number(el.dataset.index)];if(!p||el.dataset.key!=='reference')return;p.reference=el.value;delete p.source;}
+ else return;
+ workflowRuleAuthoringInvalidate(d);
+ workflowRuleAuthoringRefresh(el);
 }
-document.addEventListener('input',e=>workflowRuleAuthoringChanged({...e,target:e.target,type:'input'}));
-document.addEventListener('change',e=>workflowRuleAuthoringChanged({...e,target:e.target,type:'change'}));
+document.addEventListener('input',e=>workflowRuleAuthoringChanged({target:e.target,type:'input'}));
+document.addEventListener('change',e=>workflowRuleAuthoringChanged({target:e.target,type:'change'}));

@@ -90,7 +90,7 @@ function sceneMappingBinding(s,block,row){
   const sourceCapabilities=queryable?capabilities.filter(c=>c.object===oid&&connector(c.connector)?.enabled&&c.maps.some(m=>m.target===row.ontology)&&c.maps.some(m=>m.target===`${oid}.${obj(oid)?.props.find(p=>p.key)?.id}`)).map(c=>c.id):[];
   // 名称匹配不证明来源可用；无可用查询时显式使用当前表单输入。
   const preferred=sourceCapabilities.includes(oid==='Material'?s.master:'software.getPackage')?(oid==='Material'?s.master:'software.getPackage'):sourceCapabilities[0];
-  return {label:row.label,target:scenePrefix(s,block.id)+row.key,ontology:row.ontology,sinkTable:block.table,sinkColumn:row.column,direction:p?.key?'只读':p?.type==='引用'?'引用绑定':'建议写入',policy:p?.key?'保持稳定引用':'差异确认',instanceMode:preferred?'scene':'input',sourceCapabilities:preferred?[preferred]:[],method:'AI 名称匹配建议（本地模拟，经人工确认）'};
+  return {label:row.label,target:scenePrefix(s,block.id)+row.key,ontology:row.ontology,sinkTable:block.table,sinkColumn:row.column,direction:'建议写入',policy:p?.key?'保持稳定引用':'差异确认',instanceMode:preferred?'scene':'input',sourceCapabilities:preferred?[preferred]:[],method:'AI 名称匹配建议（本地模拟，经人工确认）'};
 }
 function sceneMappingApply(){
   const d=state.drawer,s=scene();if(d?.type!=='workflowMapping')return;
@@ -139,10 +139,10 @@ workflowBindingView=function(s){
   if(workflowScene(s).type!=='draft')return sceneMappingViewBefore(s);
   const w=workflowScene(s),block=w.blocks[s.selectedBlock]||Object.values(w.blocks)[0];if(!block)return '<div class="empty">先添加表单区块，再生成映射。</div>';s.selectedBlock=block.id;
   const bindings=s.bindings[block.id]||[];
-  return `<div class="binding-layout"><aside class="binding-tree"><div class="tree-label">数据库表 / 表单区块</div>${Object.values(w.blocks).map(b=>`<button class="tree-item ${b.id===block.id?'active':''}" data-action="scene-block" data-block="${esc(b.id)}">${icon('file')}<span>${esc(b.label)}</span><small>${(s.bindings[b.id]||[]).length}</small></button>`).join('')}</aside><div><div class="table-toolbar"><div><h3>${esc(block.label)}</h3><p class="tiny muted section-gap"><code>${esc(block.table||'未设置表名')}</code> · 字段与中文名称一起匹配</p></div><div class="row">${btn('AI 一键生成映射','workflow-ai-map','sm primary','bind')}${btn('人工添加映射','add-scene-binding','sm','plus')}</div></div><div class="table-wrap"><table class="config-table"><thead><tr><th>数据库 / 表单字段</th><th>本体对象 / 属性</th><th>映射状态 / 填入方式</th><th>操作</th></tr></thead><tbody>${block.fields.map(f=>{
+  return `<div class="binding-layout"><aside class="binding-tree"><div class="tree-label">数据库表 / 表单区块</div>${Object.values(w.blocks).map(b=>`<button class="tree-item ${b.id===block.id?'active':''}" data-action="scene-block" data-block="${esc(b.id)}">${icon('file')}<span>${esc(b.label)}</span><small>${(s.bindings[b.id]||[]).length}</small></button>`).join('')}</aside><div><div class="table-toolbar"><div><h3>${esc(block.label)}</h3><p class="tiny muted section-gap"><code>${esc(block.table||'未设置表名')}</code> · 字段与中文名称一起匹配</p></div><div class="row">${btn('AI 一键生成映射','workflow-ai-map','sm primary','bind')}${btn('人工添加映射','add-scene-binding','sm','plus')}</div></div><div class="table-wrap"><table class="config-table"><thead><tr><th>数据库 / 表单字段</th><th>本体对象 / 属性</th><th>映射状态</th><th>操作</th></tr></thead><tbody>${block.fields.map(f=>{
     const i=bindings.findIndex(b=>b.target===scenePrefix(s,block.id)+f.key),b=bindings[i],meta=sceneMappingColumn(s,block,f),mode=f.mappingMode||'mapping';
-    if(mode!=='mapping')return `<tr><td class="field-name"><code>${esc(meta.column)}</code><small>${esc(meta.label)}</small><small>${esc(scenePrefix(s,block.id)+f.key)}</small></td><td><span class="muted tiny">不参与本体映射</span></td><td>${pill(mode==='system'?'系统自动生成':'用户手动输入',mode==='system'?'blue':'')}<small class="field-path">${f.technical?'仅本地定位，不写数据库':mode==='system'?'由业务系统生成，原型不执行真实生成':'保留用户填写内容'}</small></td><td>${btn('修改字段用途','workflow-edit-block','sm','edit',`data-id="${esc(block.id)}"`)}</td></tr>`;
-    return `<tr><td class="field-name"><code>${esc(meta.column)}</code><small>${esc(meta.label)}</small><small>${esc(scenePrefix(s,block.id)+f.key)}</small></td><td>${b?`${esc(semanticPath(b.ontology))}<code class="field-path">${esc(b.ontology)}</code><small class="field-path">${esc(workflowBindingSourceLabel(s,b))}</small>`:'<span class="muted tiny">待选择本体对象属性</span>'}</td><td>${b?pill('已映射','green')+`<small class="field-path">${esc(({'建议写入':'用户确认后填入','只读':'只用于查看','双向':'读取并回填','引用绑定':'关联对应记录'})[b.direction]||b.direction)}</small>`:pill('待映射','amber')}</td><td>${b?`<button class="link" data-action="edit-scene-binding" data-index="${i}">修改</button> <button class="link danger-text" data-action="delete-scene-binding" data-index="${i}">删除</button>`:btn('添加映射','add-scene-binding','sm','plus',`data-fieldkey="${esc(f.key)}"`)}</td></tr>`;
+    if(mode!=='mapping')return `<tr><td class="field-name"><code>${esc(meta.column)}</code><small>${esc(meta.label)}</small><small>${esc(scenePrefix(s,block.id)+f.key)}</small></td><td><span class="muted tiny">不参与本体映射</span></td><td>${pill(mode==='ai'?'AI 按规则生成':mode==='system'?'系统自动生成':'用户手动输入',['system','ai'].includes(mode)?'blue':'')}<small class="field-path">${f.technical?'仅本地定位，不写数据库':mode==='ai'?esc(f.aiGenerationRule||'未填写生成规则描述'):mode==='system'?'由业务系统生成，原型不执行真实生成':'保留用户填写内容'}</small></td><td>${btn('修改字段用途','workflow-edit-block','sm','edit',`data-id="${esc(block.id)}"`)}</td></tr>`;
+    return `<tr><td class="field-name"><code>${esc(meta.column)}</code><small>${esc(meta.label)}</small><small>${esc(scenePrefix(s,block.id)+f.key)}</small></td><td>${b?`${esc(semanticPath(b.ontology))}<code class="field-path">${esc(b.ontology)}</code><small class="field-path">${esc(workflowBindingSourceLabel(s,b))}</small>`:'<span class="muted tiny">待选择本体对象属性</span>'}</td><td>${b?pill('已映射','green'):pill('待映射','amber')}</td><td>${b?`<button class="link" data-action="edit-scene-binding" data-index="${i}">修改</button> <button class="link danger-text" data-action="delete-scene-binding" data-index="${i}">删除</button>`:btn('添加映射','add-scene-binding','sm','plus',`data-fieldkey="${esc(f.key)}"`)}</td></tr>`;
   }).join('')}</tbody></table></div><p class="tiny muted scene-mapping-note">一键生成当前表的建议，人工确认后添加；不明确的匹配不自动选中。数据库列与表单路径独立，保存由业务系统完成。</p></div></div>`;
 };
 const sceneMappingAddBefore=actionsMap['add-scene-binding'];
@@ -150,7 +150,7 @@ actionsMap['add-scene-binding']=function(el){
   if(workflowScene(scene()).type!=='draft')return sceneMappingAddBefore(el);
   const s=scene(),block=workflowScene(s).blocks[s.selectedBlock],f=block.fields.find(f=>f.key===el?.dataset?.fieldkey),meta=f&&sceneMappingColumn(s,block,f);
   if(f?.mappingMode&&f.mappingMode!=='mapping')return toast('该字段不参与本体映射，请先修改字段用途。');
-  openDrawer('sceneBinding',{label:f?.label||'',target:f?scenePrefix(s,block.id)+f.key:'',ontology:'Material.materialCode',direction:'建议写入',policy:'差异确认',sinkTable:block.table,sinkColumn:meta?.column||'',instanceMode:'input',sourceCapabilities:[]},{index:-1});
+  openDrawer('sceneBinding',{label:f?.label||'',target:f?scenePrefix(s,block.id)+f.key:'',ontology:'Material.materialCode',direction:'建议写入',policy:'差异确认',sinkTable:block.table,sinkColumn:meta?.column||'',instanceMode:f&&typeof sceneTableValueSource==='function'&&['user','manual'].includes(sceneTableValueSource(s,block,f))?(sceneTableValueSource(s,block,f)==='manual'?'manual':'input'):'scene',sourceCapabilities:[]},{index:-1});
 };
 function sceneMappingPublishedContext(s,fn){
   const saved=objects.slice();
@@ -161,6 +161,7 @@ function sceneMappingBindingIssue(s,block,b,index){
   const f=block?.fields.find(f=>scenePrefix(s,block.id)+f.key===b.target),[oid,pid]=b.ontology.split('.'),p=sceneMappingObjects(s).find(o=>o.id===oid)?.props.find(p=>p.id===pid);
   if(f?.mappingMode&&f.mappingMode!=='mapping')return '该字段不参与本体映射，请先将字段用途改为参与映射。';
   if(block?.fields.some(other=>other.mappingMode&&other.mappingMode!=='mapping'&&b.sinkTable===block.table&&String(other.sinkColumn||other.key).toLowerCase()===String(b.sinkColumn).toLowerCase()))return '该数据库字段不参与本体映射，请先修改字段用途。';
+  if(f?.valueSource){const expected=f.valueSource==='user'?'input':f.valueSource==='manual'?'manual':'scene';if(b.instanceMode&&b.instanceMode!==expected)return '字段值来源与业务表字段配置不一致，请在表结构中统一修改。';}
   if(block?.database&&f&&(b.sinkTable!==block.table||b.sinkColumn!==f.sinkColumn))return '数据库映射保存位置必须与所选表字段一致，请先修改业务表结构。';
   if(!p)return '引用的本体对象属性尚未发布或不在场景锁定版本中。';
   if(f&&sceneMappingType(f.type)!==sceneMappingType(p.type))return '表单字段与本体属性类型不一致。';
@@ -177,7 +178,7 @@ actionsMap['save-scene-binding']=function(el){
   const s=scene(),d=state.drawer;if(workflowScene(s).type!=='draft')return sceneMappingSaveBefore(el);
   const ontology=d?.draft.ontology,version=ontology&&sceneMappingVersions(s)[ontology.split('.')[0]];
   const result=sceneMappingPublishedContext(s,()=>sceneMappingSaveBefore(el));
-  if(!state.drawer&&ontology&&version){s.ontologyVersions??={};s.ontologyVersions[ontology.split('.')[0]]=version;}
+  if(!state.drawer&&ontology&&version){s.ontologyVersions??={};s.ontologyVersions[ontology.split('.')[0]]=version;const f=workflowScene(s).blocks[s.selectedBlock]?.fields.find(f=>scenePrefix(s,s.selectedBlock)+f.key===d.draft.target);if(f&&!f.valueSource)f.valueSource=d.draft.instanceMode==='input'?'user':d.draft.instanceMode==='manual'?'manual':'ontology';}
   return result;
 };
 Object.assign(actionsMap,{'workflow-ai-map':sceneMappingOpen,'workflow-ai-regenerate':sceneMappingRegenerate,'workflow-ai-apply':sceneMappingApply});

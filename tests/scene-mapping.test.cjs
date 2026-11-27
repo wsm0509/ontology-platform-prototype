@@ -124,6 +124,43 @@ test('发布属性在对象修订期间仍可映射，未发布属性不可选�
   assert(pages.scenes().includes('人工调整的系列'));
   actionsMap['add-scene-binding']();assert(!extraDrawers.sceneBinding().includes('value="ProductModel.draftSeries"'));
 `));
+test('添加与编辑填入规则先表单字段后本体，预填与测试保存保持有效', () => fullWorkspace()(edit + `
+  actionsMap['add-scene-binding']({dataset:{fieldkey:'id'}});
+  let html=extraDrawers.sceneBinding();
+  for(const key of ['target','label','sinkTable','sinkColumn'])assert(html.indexOf('data-field="'+key+'"')<html.indexOf('data-field="ontology"'));
+  assert(html.includes('1 · 表单字段信息'));assert(html.includes('2 · 本体对象与取数来源'));
+  closeOverlay(true);actionsMap['edit-scene-binding']({dataset:{index:'0'}});html=extraDrawers.sceneBinding();assert(html.indexOf('data-field="target"')<html.indexOf('data-field="ontology"'));
+  assert.equal(state.drawer.draft.target,'mainOrder.releaseSubject');assert.equal(state.drawer.draft.ontology,'ReleaseOrder.releaseSubject');
+  state.drawer.draft.instanceMode='input';actionsMap['test-scene-binding']();assert(state.drawer.tested);actionsMap['save-scene-binding']();assert.equal(state.drawer,null);
+`));
+test('MVP新增和编辑映射不提供填入方式，列表不展示旧方式且兼容保存', () => fullWorkspace()(edit + `
+  const s=scene(),before=JSON.stringify(s.bindings.main);
+  actionsMap['add-scene-binding']({dataset:{fieldkey:'id'}});
+  let html=extraDrawers.sceneBinding();
+  assert(!html.includes('data-field="direction"'));assert(!html.includes('填入表单的方式'));assert(!html.includes('本体对象与填入方式'));
+  assert(html.includes('本体对象与取数来源'));assert(html.includes('data-field="ontology"'));
+  closeOverlay(true);assert.equal(JSON.stringify(s.bindings.main),before);
+  s.bindings.main[0].direction='双向';s.bindings.main[0].instanceMode='input';
+  actionsMap['edit-scene-binding']({dataset:{index:'0'}});html=extraDrawers.sceneBinding();
+  assert(!html.includes('data-field="direction"'));assert(!html.includes('读取并回填'));
+  state.drawer.draft.label='MVP发布主题';actionsMap['test-scene-binding']();assert(state.drawer.tested);actionsMap['save-scene-binding']();assert.equal(state.drawer,null);
+  assert.equal(s.bindings.main[0].label,'MVP发布主题');assert.equal(s.bindings.main[0].direction,'双向');
+  s.bindings.main.forEach((b,i)=>b.direction=['建议写入','双向','只读','引用绑定'][i%4]);
+  html=workflowBindingView(s);assert(html.includes('<th>映射状态</th>'));assert(!html.includes('填入方式'));assert(!pages.scenes().includes('填入方式'));
+  for(const label of ['用户确认后填入','读取并回填','只用于查看','关联对应记录'])assert(!html.includes(label));
+  actionsMap['add-scene-binding']({dataset:{fieldkey:'id'}});assert.equal(state.drawer.draft.direction,'建议写入');
+`));
+test('非智能提单场景保留原有填入方式配置', () => fullWorkspace()(`
+  selectScene('trial');actionsMap['scene-release-edit']({dataset:{id:'trial'}});scene().selectedBlock='main';scene().workflow.type='validation';
+  actionsMap['edit-scene-binding']({dataset:{index:'0'}});assert(extraDrawers.sceneBinding().includes('data-field="direction"'));
+  assert(workflowBindingView(scene()).includes('<th>填入方式</th>'));
+`));
+test('字段值来源在表结构统一维护，人工抽屉不再提供重复来源选择', () => fullWorkspace()(edit + `
+  actionsMap['workflow-edit-block']({dataset:{id:'main'}});actionsMap['workflow-save-block']();
+  actionsMap['edit-scene-binding']({dataset:{index:'0'}});const html=extraDrawers.sceneBinding();assert(!html.includes('data-field="instanceMode"'));assert(html.includes('字段值来源（与业务表字段配置一致）'));
+  const f=scene().workflow.blocks.main.fields.find(f=>f.key==='releaseSubject');assert.equal(f.valueSource,'ontology');
+  state.drawer.draft.instanceMode='input';actionsMap['test-scene-binding']();assert(state.drawer.error.includes('字段值来源'));
+`));
 test('多对象批量建议使用同一固定候选版本集，无效第二行不会部分写入', () => fullWorkspace()(edit + `
   actionsMap['workflow-ai-map']();state.drawer.draft.fieldsText='EXTRA_NAME | 产品型号名称 | extraName | 文本\\nEXTRA_CODE | 产品型号编码 | extraCode | 文本';actionsMap['workflow-ai-regenerate']();
   const rows=state.drawer.draft.rows;rows[0].ontology='ProductModel.modelName';rows[0].include=true;rows[1].ontology='ProductModel.modelCode';rows[1].include=true;

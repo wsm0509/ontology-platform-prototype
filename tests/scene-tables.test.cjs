@@ -100,7 +100,7 @@ check('非法字段模式、重复字段和空名称保存全部拒绝，发布�
   state.drawer.draft.fields[1].mappingMode='mapping';state.drawer.draft.fields[1].key='orderId';actionsMap['workflow-save-block']();assert(state.drawer.error.includes('重复')||state.drawer.error.includes('字段'));assert.equal(JSON.stringify(scene().workflow.blocks),before);
   state.drawer.draft.fields[1].key='orderName';state.drawer.draft.label=' ';actionsMap['workflow-save-block']();assert(state.drawer.error.includes('名称'));assert.equal(JSON.stringify(scene().workflow.blocks),before);
   state.drawer.draft.label='销售订单';actionsMap['workflow-save-block']();assert.equal(state.drawer,null);assert(sceneTableConfigIssues(scene()).some(i=>i.includes('尚未配置')));
-  scene().workflow.blocks.salesOrder.fields.forEach(f=>f.mappingMode='system');assert.equal(sceneTableConfigIssues(scene()).length,0);
+  scene().workflow.blocks.salesOrder.fields.forEach(f=>{f.mappingMode='system';f.valueSource='system';});assert.equal(sceneTableConfigIssues(scene()).length,0);
   scene().workflow.blocks.salesOrder.fields[0].mappingMode='mapping';assert(sceneTableConfigIssues(scene()).some(i=>i.includes('尚未配置')));
   scene().workflow.blocks.salesOrder.fields[0].mappingMode='system';connector('orders').enabled=false;assert(sceneTableConfigIssues(scene()).some(i=>i.includes('数据库')));
 `);
@@ -134,6 +134,34 @@ check('元数据移除规则引用字段时编辑保存拒绝，不留悬空引�
 `);
 check('legacy原表不借用多个数据库的同名结构，原字段可保留', `
   tableSchemas.OTHER=[structuredClone(tableSchemas.IRDMS.find(t=>t.table==='PRODUCT_RELEASE_ORDER'))];actionsMap['workflow-edit-block']({dataset:{id:'main'}});assert.equal(sceneTableSchema(state.drawer.draft,{legacyEdit:true}).fields.length,0);actionsMap['workflow-save-block']();assert.equal(state.drawer,null);
+`);
+check('未参与映射来源增加AI按规则生成，实际事件显示规则描述且必填才能保存', select + `
+  assert(extraDrawers.workflowBlock().includes('AI 按规则生成'));
+  dispatchTestEvent('change',{dataset:{tableMapping:'1'},checked:false});
+  dispatchTestEvent('change',{dataset:{tableOrigin:'1'},value:'ai'});
+  assert.equal(state.drawer.draft.fields[1].mappingMode,'ai');
+  assert(extraDrawers.workflowBlock().includes('data-table-ai-rule="1"'));
+  const before=JSON.stringify(scene().workflow.blocks);actionsMap['workflow-save-block']();assert(state.drawer.error.includes('生成规则描述'));assert.equal(JSON.stringify(scene().workflow.blocks),before);
+  dispatchTestEvent('input',{dataset:{tableAiRule:'1'},value:'根据用户描述、产品型号和发布区域生成简洁的订单名称，不虚构事实。'});
+  assert(state.drawer.dirty);actionsMap['workflow-save-block']();assert.equal(state.drawer,null);
+  const aiField=scene().workflow.blocks.salesOrder.fields.find(f=>f.key==='orderName');assert.equal(aiField.mappingMode,'ai');assert(aiField.aiGenerationRule.includes('产品型号'));
+  actionsMap['workflow-edit-block']({dataset:{id:'salesOrder'}});const html=extraDrawers.workflowBlock();assert(html.includes('根据用户描述'));assert.equal(state.drawer.draft.fields[1].aiGenerationRule,aiField.aiGenerationRule);
+`);
+check('切换字段来源保留生成描述但仅AI模式必填，重新勾选映射不会丢失草稿', select + `
+  dispatchTestEvent('change',{dataset:{tableMapping:'1'},checked:false});dispatchTestEvent('change',{dataset:{tableOrigin:'1'},value:'ai'});
+  dispatchTestEvent('input',{dataset:{tableAiRule:'1'},value:'结合物料名称生成业务标题'});
+  dispatchTestEvent('change',{dataset:{tableOrigin:'1'},value:'user'});assert.equal(state.drawer.draft.fields[1].aiGenerationRule,'结合物料名称生成业务标题');
+  dispatchTestEvent('change',{dataset:{tableOrigin:'1'},value:'ai'});dispatchTestEvent('change',{dataset:{tableMapping:'1'},checked:true});assert.equal(state.drawer.draft.fields[1].mappingMode,'mapping');
+  dispatchTestEvent('change',{dataset:{tableMapping:'1'},checked:false});assert.equal(state.drawer.draft.fields[1].mappingMode,'ai');
+  dispatchTestEvent('input',{dataset:{tableAiRule:'1'},value:'  '});dispatchTestEvent('change',{dataset:{tableOrigin:'1'},value:'system'});actionsMap['workflow-save-block']();assert.equal(state.drawer,null);
+`);
+check('AI生成字段不进入本体映射，发布复核描述；技术字段不可改为AI来源', select + `
+  dispatchTestEvent('change',{dataset:{tableMapping:'1'},checked:false});dispatchTestEvent('change',{dataset:{tableOrigin:'1'},value:'ai'});dispatchTestEvent('input',{dataset:{tableAiRule:'1'},value:'按业务上下文生成标题'});actionsMap['workflow-save-block']();
+  const b=scene().workflow.blocks.salesOrder;assert(!sceneMappingFields(scene(),b).some(f=>f.key==='orderName'));assert(pages.scenes().includes('AI 按规则生成'));assert(pages.scenes().includes('按业务上下文生成标题'));
+  b.fields.find(f=>f.key==='orderName').aiGenerationRule='';assert(sceneTableConfigIssues(scene()).some(i=>i.includes('生成规则描述')));
+  closeOverlay(true);connector('orders').configs.database.tables[0].columns.forEach(f=>delete f.primary);
+` + select + `
+  const i=state.drawer.draft.fields.findIndex(f=>f.technical);dispatchTestEvent('change',{dataset:{tableOrigin:String(i)},value:'ai'});assert.equal(state.drawer.draft.fields[i].mappingMode,'system');
 `);
 check('缺省字段模式保持 legacy 映射解释；schema 变动发布检查可定位', select + `
   assert.equal(sceneTableFieldMode({key:'legacy'}),'mapping');assert.equal(sceneTableFieldMode({mappingMode:'user'}),'user');actionsMap['workflow-save-block']();assert.equal(state.drawer,null);

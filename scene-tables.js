@@ -1,6 +1,12 @@
 /* 智能提单业务单据结构：真实连接选表、只读字段元数据与逐字段用途。无网络请求。 */
 'use strict';
 function sceneTableFieldMode(f){return f?.mappingMode??'mapping';}
+function sceneTableValueSource(s,b,f){
+ if(f?.valueSource)return f.valueSource;
+ const mode=sceneTableFieldMode(f);if(mode!=='mapping')return mode;
+ const binding=f&&sceneTableFieldBinding(s,b,f);return binding?.instanceMode==='input'?'user':binding?.instanceMode==='manual'?'manual':'ontology';
+}
+function sceneTableSourceLabel(source){return ({ontology:'本体对象数据',user:'用户手动输入',system:'系统自动生成',ai:'AI 按规则生成',manual:'本体手工记录（已有配置）'})[source]||'本体对象数据';}
 function sceneTableIdentifier(value){
   const parts=String(value||'').split('.').at(-1).replace(/([a-z0-9])([A-Z])/g,'$1_$2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
   let id=parts.map((p,i)=>i?p[0].toUpperCase()+p.slice(1):p).join('');
@@ -59,7 +65,7 @@ function sceneTableFieldBinding(s,b,f){return (s.bindings?.[b.id]||[]).find(bind
 function sceneTableRuleReferences(s,b,key){
   const full=scenePrefix(s,b.id)+key;
   return (workflowScene(s).rules||[]).some(r=>{
-    const values=[...(r.conditions||[]),...(r.assertions||[])].map(a=>a.fact).concat(Object.values(r.params||{}));
+    const values=[...(r.conditions||[]),...(r.assertions||[])].map(a=>a.fact).concat(Object.values(r.params||{}),...(r.ruleCard?.references||[]).map(ref=>ref.source).filter(Boolean),...(r.ruleCard?.queries||[]).flatMap(q=>(q.params||[]).map(p=>p.source).filter(Boolean)));
     return values.some(v=>v===full||v===b.path+'.'+key||r.scope===b.id&&(v==='Row.'+key||v==='row.'+key)||!b.parent&&(v==='Order.'+key||v==='order.'+key));
   });
 }
@@ -106,9 +112,13 @@ function sceneTableInput(e){
   else if(has('tableSelect')&&d.draft.table!==el.value){d.draft.table=el.value;changed=true;rebuild=true;}
   else if(has('tableMapping')||has('tableOrigin')){
     const index=Number(has('tableMapping')?el.dataset.tableMapping:el.dataset.tableOrigin),f=d.draft.fields[index];if(!f||!Number.isInteger(index)||f.technical)return;
-    if(has('tableMapping')){if(!el.checked){d.origins[index]??=f.primary||f.technical?'system':'user';f.mappingMode=d.origins[index];}else{if(sceneTableFieldMode(f)!=='mapping')d.origins[index]=sceneTableFieldMode(f);f.mappingMode='mapping';}}
-    else if(['user','system'].includes(el.value)&&sceneTableFieldMode(f)!=='mapping'){f.mappingMode=el.value;d.origins[index]=el.value;}else return;
-    const origin=document.getElementById('table-origin-'+index);if(origin){origin.disabled=sceneTableFieldMode(f)==='mapping';origin.value=d.origins[index]||'user';}changed=true;
+    if(has('tableMapping')){if(!el.checked){d.origins[index]??=f.primary||f.technical?'system':'user';f.mappingMode=d.origins[index];f.valueSource=f.mappingMode;}else{if(sceneTableFieldMode(f)!=='mapping')d.origins[index]=sceneTableFieldMode(f);f.mappingMode='mapping';f.valueSource='ontology';}}
+    else if(['user','system','ai'].includes(el.value)&&sceneTableFieldMode(f)!=='mapping'){f.mappingMode=el.value;f.valueSource=el.value;d.origins[index]=el.value;}else return;
+    const origin=document.getElementById('table-origin-'+index);if(origin){origin.disabled=sceneTableFieldMode(f)==='mapping';origin.value=d.origins[index]||'user';}
+    const rulePanel=document.getElementById('table-ai-rule-panel-'+index);if(rulePanel)rulePanel.hidden=sceneTableFieldMode(f)!=='ai';changed=true;
+  }else if(has('tableAiRule')){
+    const index=Number(el.dataset.tableAiRule),f=d.draft.fields[index];if(!Number.isInteger(index)||!f||f.technical||sceneTableFieldMode(f)!=='ai')return;
+    f.aiGenerationRule=el.value;changed=true;
   }else if(el.dataset?.field==='label')changed=true;
   if(!changed)return;d.dirty=true;d.error='';
   if(rebuild){sceneTableBuildDraft(d);drawOverlay();}
@@ -123,7 +133,9 @@ function sceneTableBlockIssues(s,b){
   for(const f of fields){
     if(!/^[A-Za-z]\w*$/.test(f.key)||['constructor','prototype','__proto__'].includes(f.key)||!String(f.label||'').trim()||!['文本','数字','布尔','日期'].includes(f.type))push(`字段 ${f.key||'（空）'} 标识、名称或类型不合法。`);
     if(keys.has(f.key))push(`字段 ${f.key} 重复。`);keys.add(f.key);
-    if(!['mapping','user','system'].includes(sceneTableFieldMode(f)))push(`字段 ${f.key} 用途不合法，只允许映射、手动输入或系统生成。`);
+    if(f.valueSource&&f.mappingMode!=='mapping'&&f.valueSource!==f.mappingMode)push(`字段 ${f.key} 来源与用途不一致。`);
+    if(!['mapping','user','system','ai'].includes(sceneTableFieldMode(f)))push(`字段 ${f.key} 用途不合法，只允许映射、手动输入、系统生成或 AI 按规则生成。`);
+    if(sceneTableFieldMode(f)==='ai'&&!String(f.aiGenerationRule||'').trim())push(`字段 ${f.label} 请选择并填写 AI 生成规则描述。`);
     if(sceneTableFieldMode(f)!=='mapping'&&sceneTableFieldBinding(s,b,f))push(`字段 ${f.key} 已有映射，请先删除或先解除对应关系再修改用途。`);
     if(f.technical&&(sceneTableFieldMode(f)!=='system'||f.sinkColumn||f.primary))push(`字段 ${f.key} 为技术行标识，必须由系统自动生成且不对应数据库列或真实主键。`);
     if(f.sinkColumn){const column=f.sinkColumn.toLowerCase();if(columns.has(column))push(`数据库字段 ${f.sinkColumn} 重复。`);columns.add(column);}
@@ -167,6 +179,7 @@ function sceneTableSave(){
   }
   if(old)for(const f of old.fields.filter(f=>!v.fields.some(n=>n.key===f.key)))if(sceneTableFieldBinding(s,old,f)||sceneTableRuleReferences(s,old,f.key))return errorDrawer(`字段 ${f.key} 被对应关系或规则引用，请先解除引用。`);
   if(v.parent&&!w.blocks[v.parent]||!v.parent&&v.many||!v.parent&&Object.values(w.blocks).some(b=>!b.parent&&b.id!==v.id))return errorDrawer('主区块或记录结构已变化，请重新打开编辑。');
+  for(const f of v.fields)f.valueSource=f.mappingMode==='mapping'?sceneTableValueSource(s,v,f):f.mappingMode;
   const {cardinality,fieldsText,...block}=v;
   if(block.database){const schema=sceneTableSchema(block);if(schema.error)return errorDrawer(schema.error);if(block.tableMeta?.signature!==schema.signature)return errorDrawer('数据库表或字段元数据已变化，请关闭后重新编辑。');block.structureSource='table';}
   const next=structuredClone(s);next.workflow.blocks[block.id]=block;next.bindings[block.id]??=[];
@@ -179,9 +192,9 @@ function sceneTableEditor(){
   const dbOptions=[['','请选择数据库'],...dbs.map(c=>[c.id,`${c.name} · ${c.id}`])];if(v.database&&!dbs.some(c=>c.id===v.database))dbOptions.push([v.database,'原数据库已不可用，请重新选择']);
   const tableOptions=[['','请选择表'],...tables.map(t=>[t.name,`${t.name}${t.description?' · '+t.description:''}`])];if(v.table&&!tables.some(t=>t.name===v.table))tableOptions.push([v.table,legacy?`${v.table} · 原表（未配置数据库）`:`${v.table} · 已不可用`]);
   const schema=v.database?sceneTableSchema(v):null,error=d.schemaError||schema?.error;
-  const fields=v.fields.map((f,i)=>{const mode=sceneTableFieldMode(f),locked=f.technical,origin=mode==='mapping'?d.origins[i]||'user':mode;return `<tr class="scene-table-field"><td><code>${esc(f.sinkColumn||'—')}</code><small class="field-path">${esc(f.key)}${f.technical?' · 技术字段':''}</small></td><td>${esc(f.label)}</td><td>${esc(f.type)}${f.required?' · 必填':''}</td><td>${f.primary?pill('主键','blue'):f.technical?pill('本地行标识','amber'):'—'}</td><td><label class="check-row"><input type="checkbox" data-table-mapping="${i}" aria-label="${esc(f.label)}参与映射" ${mode==='mapping'?'checked':''} ${locked?'disabled':''}>参与映射</label></td><td><select id="table-origin-${i}" data-table-origin="${i}" aria-label="${esc(f.label)}未参与映射来源" ${mode==='mapping'||locked?'disabled':''}>${options([['user','用户手动输入'],['system','系统自动生成']],origin)}</select></td></tr>`;}).join('');
+  const fields=v.fields.map((f,i)=>{const mode=sceneTableFieldMode(f),locked=f.technical,origin=mode==='mapping'?d.origins[i]||'user':mode;return `<tr class="scene-table-field"><td><code>${esc(f.sinkColumn||'—')}</code><small class="field-path">${esc(f.key)}${f.technical?' · 技术字段':''}</small></td><td>${esc(f.label)}</td><td>${esc(f.type)}${f.required?' · 必填':''}</td><td>${f.primary?pill('主键','blue'):f.technical?pill('本地行标识','amber'):'—'}</td><td><label class="check-row"><input type="checkbox" data-table-mapping="${i}" aria-label="${esc(f.label)}参与映射" ${mode==='mapping'?'checked':''} ${locked?'disabled':''}>参与映射</label></td><td><select id="table-origin-${i}" data-table-origin="${i}" aria-label="${esc(f.label)}字段值来源" ${mode==='mapping'||locked?'disabled':''}>${options([...(mode==='mapping'?[[sceneTableValueSource(scene(),v,f),sceneTableSourceLabel(sceneTableValueSource(scene(),v,f))]]:[]),['user','用户手动输入'],['system','系统自动生成'],['ai','AI 按规则生成']],mode==='mapping'?sceneTableValueSource(scene(),v,f):origin)}</select><div id="table-ai-rule-panel-${i}" class="table-ai-rule-panel" ${mode==='ai'?'':'hidden'}><label for="table-ai-rule-${i}">生成规则描述 *</label><textarea id="table-ai-rule-${i}" data-table-ai-rule="${i}" aria-label="${esc(f.label)}生成规则描述" placeholder="例如：根据用户输入的产品名称、发布区域和版本生成简洁标题，不虚构信息。">${esc(f.aiGenerationRule||'')}</textarea><small>用于该字段的生成要求，不参与本体属性映射；配置保存不代表已执行 AI。</small></div></td></tr>`;}).join('');
   const noPK=v.fields.length&&!v.fields.some(f=>f.primary),hint=legacy?'原表未绑定数据库：可保留原表编辑既有字段，不会创建数据库连接。':'只列出已启用且已配置数据表的数据库连接；字段来自该库的表元数据。';
-  return frame(d.isNew?'添加业务表结构':'编辑业务表结构','选择数据库和表，设置业务区块名称与字段用途；无需选择本体对象或所属区块。',`<div class="form-grid scene-table-config"><div class="form-field"><label for="scene-table-database">选择数据库 *</label><select id="scene-table-database" data-table-database>${options(dbOptions,v.database)}</select><small>${hint}</small></div><div class="form-field"><label for="scene-table-select">选择表 *</label><select id="scene-table-select" data-table-select>${options(tableOptions,v.table)}</select></div>${field('表名称 / 区块名称 *','label',v.label)}</div><div class="scene-table-summary sample section-gap">英文标识（自动）：<code>${esc(v.id||'选表后生成')}</code> · 路径：<code>${esc(v.path||'—')}${v.many?'[]':''}</code> · 行标识：<code>${esc(v.keyField||'—')}</code></div>${error?`<div class="section-gap">${inf(esc(error),'amber')}</div>`:''}${noPK?`<div class="section-gap">${inf('没有真实主键；新表使用系统生成的本地行标识，不对应数据库列。既有表保留原行标识。','amber')}</div>`:''}${v.tableMeta?.primarySource==='sample-first-column'?`<p class="tiny muted section-gap">主键依据：该连接已知样例的第一列约定（非实时数据库验证）。</p>`:''}<div class="between section-gap"><h3>自动字段预览</h3><span class="tiny muted">${v.fields.length} 个字段 · 取消勾选后选择手动输入或系统生成</span></div><div class="table-wrap section-gap"><table class="config-table scene-table-fields"><thead><tr><th>数据库英文字段 / 路径</th><th>中文名称</th><th>类型</th><th>主键</th><th>参与映射</th><th>未参与映射来源</th></tr></thead><tbody>${fields||'<tr><td colspan="6" class="empty">请先选择已配置字段元数据的数据库表。</td></tr>'}</tbody></table></div><p class="tiny muted section-gap">已有绑定须先删除后才能退出映射。规则引用字段可不参与映射，但不能删除。所属关系是区块技术容器，不代表数据库外键。</p>`,btn('保存表单结构','workflow-save-block','primary','check',(!v.fields.length||error)?'disabled':''),true);
+  return frame(d.isNew?'添加业务表结构':'编辑业务表结构','选择数据库和表，设置业务区块名称与字段用途；无需选择本体对象或所属区块。',`<div class="form-grid scene-table-config"><div class="form-field"><label for="scene-table-database">选择数据库 *</label><select id="scene-table-database" data-table-database>${options(dbOptions,v.database)}</select><small>${hint}</small></div><div class="form-field"><label for="scene-table-select">选择表 *</label><select id="scene-table-select" data-table-select>${options(tableOptions,v.table)}</select></div>${field('表名称 / 区块名称 *','label',v.label)}</div><div class="scene-table-summary sample section-gap">英文标识（自动）：<code>${esc(v.id||'选表后生成')}</code> · 路径：<code>${esc(v.path||'—')}${v.many?'[]':''}</code> · 行标识：<code>${esc(v.keyField||'—')}</code></div>${error?`<div class="section-gap">${inf(esc(error),'amber')}</div>`:''}${noPK?`<div class="section-gap">${inf('没有真实主键；新表使用系统生成的本地行标识，不对应数据库列。既有表保留原行标识。','amber')}</div>`:''}${v.tableMeta?.primarySource==='sample-first-column'?`<p class="tiny muted section-gap">主键依据：该连接已知样例的第一列约定（非实时数据库验证）。</p>`:''}<div class="between section-gap"><h3>自动字段预览</h3><span class="tiny muted">${v.fields.length} 个字段 · 取消勾选后选择手动输入、系统生成或 AI 按规则生成</span></div><div class="table-wrap section-gap"><table class="config-table scene-table-fields"><thead><tr><th>数据库英文字段 / 路径</th><th>中文名称</th><th>类型</th><th>主键</th><th>参与映射</th><th>字段值来源</th></tr></thead><tbody>${fields||'<tr><td colspan="6" class="empty">请先选择已配置字段元数据的数据库表。</td></tr>'}</tbody></table></div><p class="tiny muted section-gap">已有绑定须先删除后才能退出映射。规则引用字段可不参与映射，但不能删除。所属关系是区块技术容器，不代表数据库外键。</p>`,btn('保存表单结构','workflow-save-block','primary','check',(!v.fields.length||error)?'disabled':''),true);
 }
 const sceneTableDrawerBefore=extraDrawers.workflowBlock;
 extraDrawers.workflowBlock=function(){return state.drawer?.tableMode&&workflowScene(scene()).type==='draft'?sceneTableEditor():sceneTableDrawerBefore();};
@@ -192,5 +205,5 @@ actionsMap['workflow-save-block']=function(el){return state.drawer?.tableMode?sc
 const sceneTableStructureBefore=workflowStructureView;
 workflowStructureView=function(s){
   if(workflowScene(s).type!=='draft')return sceneTableStructureBefore(s);
-  return `<div class="panel-body scene-table-structure"><div class="between"><div><h3>业务单据结构</h3><p class="tiny muted section-gap">选择数据库表，预览字段并勾选需要映射的字段；其余字段由用户输入或系统生成。</p></div>${btn('添加表单区块','workflow-add-block','sm','plus')}</div><div class="table-wrap section-gap"><table class="config-table"><thead><tr><th>表名称 / 区块名称</th><th>数据库 / 表</th><th>行标识</th><th>字段用途</th><th>操作</th></tr></thead><tbody>${Object.values(workflowScene(s).blocks).map(b=>`<tr><td class="field-name">${esc(b.label)}<code class="field-path">${esc(b.path)}${b.many?'[]':''}</code></td><td>${esc(b.database?systemConnectors.find(c=>c.id===b.database)?.name||'原数据库已不可用':'原表（未配置数据库）')}<small class="field-path">${esc(b.database||'')} · ${esc(b.table)}</small></td><td><code>${esc(b.keyField)}</code>${b.fields.find(f=>f.key===b.keyField)?.technical?'<small class="field-path">本地行标识，非数据库主键</small>':''}</td><td>${b.fields.length} 项 · ${b.fields.filter(f=>sceneTableFieldMode(f)==='mapping').length} 参与映射</td><td><button class="link" data-action="workflow-edit-block" data-id="${esc(b.id)}">编辑</button> <button class="link danger-text" data-action="workflow-delete-block" data-id="${esc(b.id)}">删除</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">尚未添加业务表结构。</td></tr>'}</tbody></table></div></div>`;
+  return `<div class="panel-body scene-table-structure"><div class="between"><div><h3>业务单据结构</h3><p class="tiny muted section-gap">选择数据库表，预览字段并勾选需要映射的字段；其余字段由用户输入、系统生成或 AI 按规则生成。</p></div>${btn('添加表单区块','workflow-add-block','sm','plus')}</div><div class="table-wrap section-gap"><table class="config-table"><thead><tr><th>表名称 / 区块名称</th><th>数据库 / 表</th><th>行标识</th><th>字段用途</th><th>操作</th></tr></thead><tbody>${Object.values(workflowScene(s).blocks).map(b=>`<tr><td class="field-name">${esc(b.label)}<code class="field-path">${esc(b.path)}${b.many?'[]':''}</code></td><td>${esc(b.database?systemConnectors.find(c=>c.id===b.database)?.name||'原数据库已不可用':'原表（未配置数据库）')}<small class="field-path">${esc(b.database||'')} · ${esc(b.table)}</small></td><td><code>${esc(b.keyField)}</code>${b.fields.find(f=>f.key===b.keyField)?.technical?'<small class="field-path">本地行标识，非数据库主键</small>':''}</td><td>${b.fields.length} 项 · ${b.fields.filter(f=>sceneTableFieldMode(f)==='mapping').length} 参与映射</td><td><button class="link" data-action="workflow-edit-block" data-id="${esc(b.id)}">编辑</button> <button class="link danger-text" data-action="workflow-delete-block" data-id="${esc(b.id)}">删除</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">尚未添加业务表结构。</td></tr>'}</tbody></table></div></div>`;
 };
